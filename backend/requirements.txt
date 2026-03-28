@@ -1,3 +1,7 @@
+cmake
+dlib
+face-recognition-models
+face-recognition
 fastapi
 uvicorn
 numpy
@@ -10,5 +14,3 @@ python-dotenv
 google-generativeai
 psycopg2-binary
 gunicorn
-face_recognition_models @ git+https://github.com/ageitgey/face_recognition_models.git
-face_recognition
