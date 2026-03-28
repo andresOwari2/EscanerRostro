@@ -30,13 +30,8 @@ RUN mkdir -p /app/backend/models && \
 # Copy the entire backend source code
 COPY backend /app/backend
 
-# Copy .env file if it exists
-COPY .env* /app/
-
 # The port will be provided by Render
 ENV PORT=10000
 
-# Run the application with Gunicorn
-# Multi-worker is now possible because OpenCV is lighter than dlib,
-# but we'll stick to 1-2 workers to stay safe on free tier.
-CMD gunicorn -w 1 -k uvicorn.workers.UvicornWorker --bind 0.0.0.0:${PORT} backend.main:app
+# Run the application with Uvicorn directly for better health check handling on Render free tier
+CMD uvicorn backend.main:app --host 0.0.0.0 --port $PORT

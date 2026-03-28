@@ -40,8 +40,14 @@ import os
 from dotenv import load_dotenv
 import google.generativeai as genai
 
-# Load environment variables (searches in current or parent directory)
-load_dotenv(os.path.join(os.path.dirname(__file__), "..", ".env"))
+# Load environment variables from .env file ONLY if they are not already set in the system
+# This prevents a local .env file from overriding Render's environment variables
+env_path = os.path.join(os.path.dirname(__file__), "..", ".env")
+if os.path.exists(env_path):
+    load_dotenv(env_path, override=False)
+    logger.info("Loaded local .env file (non-override mode)")
+else:
+    logger.info("No local .env file found, using system environment variables")
 
 # Configure Gemini
 api_key = os.getenv("gemini_APIKEY")
@@ -62,7 +68,17 @@ app.add_middleware(
 
 @app.on_event("startup")
 def startup():
-    init_db()
+    logger.info("--- APPLICATION STARTUP ---")
+    try:
+        logger.info("Initializing database...")
+        init_db()
+        logger.info("Database initialized successfully.")
+    except Exception as e:
+        logger.error(f"FATAL: Database initialization failed: {e}")
+        # We don't raise here to allow the process to stay alive 
+        # so we can see the logs in Render, or let the health check fail naturally.
+    
+    logger.info("Startup sequence complete.")
 
 @app.post("/register/check_face")
 async def check_face(
