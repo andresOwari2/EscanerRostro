@@ -79,6 +79,10 @@ def startup():
         # so we can see the logs in Render, or let the health check fail naturally.
     
     logger.info("Startup sequence complete.")
+    
+@app.get("/")
+def health_check():
+    return {"status": "ok", "message": "Face Attendance API is running"}
 
 @app.post("/register/check_face")
 async def check_face(
