@@ -20,3 +20,10 @@ backend/__pycache__/
 # Dev
 .vscode/
 .idea/
+
+# Node / Frontend
+node_modules/
+dist/
+.eslintcache
+.stylelintcache
+*.log
