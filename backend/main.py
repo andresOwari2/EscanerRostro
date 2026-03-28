@@ -20,16 +20,12 @@ if backend_dir not in sys.path:
     sys.path.insert(0, backend_dir)
     logger.info(f"Added {backend_dir} to sys.path")
 
-# Try to pinpoint the face_recognition_models failure
+# The system now uses OpenCV (YuNet + SFace) instead of dlib to reduce RAM usage.
 try:
-    logger.info("Attempting to import face_recognition_models manually...")
-    import face_recognition_models
-    logger.info(f"SUCCESS: Models found at {face_recognition_models.__file__}")
-except ImportError as e:
-    logger.error(f"CRITICAL: face_recognition_models not found. Error: {str(e)}")
-except Exception as e:
-    logger.error(f"UNKNOWN ERROR importing models: {str(e)}")
-    logger.error(traceback.format_exc())
+    import cv2
+    logger.info(f"OpenCV version: {cv2.__version__}")
+except ImportError:
+    logger.error("OpenCV not found in environment")
 
 from fastapi import FastAPI, Depends, HTTPException, UploadFile, File, Form
 from fastapi.middleware.cors import CORSMiddleware
@@ -152,7 +148,7 @@ async def verify(
     
     for vec in all_vectors:
         known_encoding = json.loads(vec.vector)
-        if face_logic.compare_faces([known_encoding], unknown_encoding, tolerance=0.5):
+        if face_logic.compare_faces([known_encoding], unknown_encoding, tolerance=0.4):
             user = db.query(User).filter(User.id == vec.user_id).first()
             
             # Register in General Log

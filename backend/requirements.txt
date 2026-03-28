@@ -5,10 +5,8 @@ sqlalchemy
 pymysql
 cryptography
 python-multipart
-opencv-python-headless
+opencv-contrib-python-headless
 python-dotenv
 google-generativeai
 psycopg2-binary
 gunicorn
-face-recognition-models
-face-recognition

@@ -1,0 +1,22 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.env
+.venv
+env/
+venv/
+ENV/
+
+# Face Models (Automated via Dockerfile, keep repo light)
+backend/models/*.onnx
+
+# Binary cache
+backend/__pycache__/
+
+# Database
+*.db
+
+# Dev
+.vscode/
+.idea/
