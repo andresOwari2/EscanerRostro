@@ -1,13 +1,35 @@
 import sys
 import os
-
-# Add backend and site-packages to path
-backend_dir = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, backend_dir)
-
 import logging
-logging.basicConfig(level=logging.INFO)
+import traceback
+
+# Setup logging ASAP for Render diagnostics
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
 logger = logging.getLogger(__name__)
+
+logger.info(f"--- RENDER STARTUP DIAGNOSTICS ---")
+logger.info(f"CWD: {os.getcwd()}")
+logger.info(f"Python Version: {sys.version}")
+
+# Add backend to path robustly
+backend_dir = os.path.dirname(os.path.abspath(__file__))
+if backend_dir not in sys.path:
+    sys.path.insert(0, backend_dir)
+    logger.info(f"Added {backend_dir} to sys.path")
+
+# Try to pinpoint the face_recognition_models failure
+try:
+    logger.info("Attempting to import face_recognition_models manually...")
+    import face_recognition_models
+    logger.info(f"SUCCESS: Models found at {face_recognition_models.__file__}")
+except ImportError as e:
+    logger.error(f"CRITICAL: face_recognition_models not found. Error: {str(e)}")
+except Exception as e:
+    logger.error(f"UNKNOWN ERROR importing models: {str(e)}")
+    logger.error(traceback.format_exc())
 
 from fastapi import FastAPI, Depends, HTTPException, UploadFile, File, Form
 from fastapi.middleware.cors import CORSMiddleware
