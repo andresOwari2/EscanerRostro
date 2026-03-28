@@ -7,3 +7,5 @@ pymysql
 cryptography
 python-multipart
 opencv-python-headless
+python-dotenv
+google-generativeai

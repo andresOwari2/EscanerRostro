@@ -3,7 +3,7 @@ import Webcam from 'react-webcam'
 import axios from 'axios'
 import { Camera, User, LogIn, CheckCircle, AlertCircle, RefreshCw, Smartphone } from 'lucide-react'
 
-const API_BASE = "http://localhost:8000"
+const API_BASE = "http://localhost:8001"
 
 export default function App() {
   const [view, setView] = useState('menu') // menu, attendance, register, manual
@@ -20,8 +20,19 @@ export default function App() {
   const [faceBox, setFaceBox] = useState(null)
   const [landmarks, setLandmarks] = useState(null)
   const [loggedInUser, setLoggedInUser] = useState(null)
+  const [greeting, setGreeting] = useState('')
   
   const webcamRef = useRef(null)
+
+  const speakGreeting = (text) => {
+    if (!window.speechSynthesis) return
+    window.speechSynthesis.cancel() // Stop any previous speech
+    const utterance = new SpeechSynthesisUtterance(text)
+    utterance.lang = 'es-ES' // Set to Spanish
+    utterance.rate = 1.0
+    utterance.pitch = 1.1
+    window.speechSynthesis.speak(utterance)
+  }
 
   const showStatus = (type, msg) => {
     setStatus({ type, msg })
@@ -45,8 +56,10 @@ export default function App() {
       if (res.data.status === 'success') {
         setLoggedInUser(res.data.user)
         setWelcomeMsg(res.data.message)
+        setGreeting(res.data.greeting || '')
         setView('welcome')
         showStatus('success', res.data.message)
+        if (res.data.greeting) speakGreeting(res.data.greeting)
       } else {
         showStatus('error', 'Rostro no reconocido / No estás registrado')
       }
@@ -159,8 +172,10 @@ export default function App() {
       const res = await axios.post(`${API_BASE}/login_manual`, formData)
       setLoggedInUser(res.data.user)
       setWelcomeMsg(res.data.message)
+      setGreeting(res.data.greeting || '')
       setView('welcome')
       showStatus('success', res.data.message)
+      if (res.data.greeting) speakGreeting(res.data.greeting)
     } catch (err) {
       showStatus('error', err.response?.data?.detail || 'Credenciales inválidas')
     } finally {
@@ -343,9 +358,23 @@ export default function App() {
             <CheckCircle size={80} color="var(--accent)" style={{ margin: '0 auto 20px' }} />
           </div>
           <h2 style={{ fontSize: '2rem', marginBottom: '10px' }}>¡Bienvenido!</h2>
-          <p style={{ fontSize: '1.5rem', fontWeight: 'bold', color: 'var(--primary)', marginBottom: '30px' }}>
+          <p style={{ fontSize: '1.5rem', fontWeight: 'bold', color: 'var(--primary)', marginBottom: '10px' }}>
             {loggedInUser}
           </p>
+          {greeting && (
+            <p style={{ 
+              fontSize: '1.1rem', 
+              color: 'var(--accent)', 
+              marginBottom: '30px', 
+              fontStyle: 'italic',
+              padding: '10px 20px',
+              borderLeft: '4px solid var(--accent)',
+              backgroundColor: 'rgba(0, 255, 127, 0.1)',
+              borderRadius: '0 8px 8px 0'
+            }}>
+              "{greeting}"
+            </p>
+          )}
           <p style={{ color: 'var(--text-dim)', marginBottom: '20px' }}>{welcomeMsg}</p>
           <button className="btn btn-primary" onClick={() => { setLoggedInUser(null); setView('attendance'); }}>
             Cerrar Sesión

@@ -7,6 +7,19 @@ import uvicorn
 from database import init_db, get_db, User, FaceVector, AttendanceLog, AttendanceSession
 import face_logic
 import datetime
+import os
+from dotenv import load_dotenv
+import google.generativeai as genai
+
+# Load environment variables (searches in current or parent directory)
+load_dotenv(os.path.join(os.path.dirname(__file__), "..", ".env"))
+
+# Configure Gemini
+api_key = os.getenv("gemini_APIKEY")
+if api_key:
+    genai.configure(api_key=api_key)
+else:
+    print("Warning: gemini_APIKEY not found in environment variables")
 
 app = FastAPI(title="Face Attendance API")
 
@@ -132,7 +145,28 @@ async def verify(
                     db.add(new_session)
             
             db.commit()
-            return {"status": "success", "user": user.full_name, "message": f"{action.capitalize()} registrada para {user.full_name}"}
+            
+            # Gemini Greeting disabled by user request
+            greeting = "" 
+            # try:
+            #     model = genai.GenerativeModel("gemini-2.5-flash")
+            #     tipo_mensaje = "saludo de BIENVENIDA" if action == "entrada" else "mensaje de DESPEDIDA"
+            #     prompt = (
+            #         f"Genera un {tipo_mensaje} corto, creativo y orientado a PROGRAMADORES/DEVS para {user.full_name} "
+            #         f"que acaba de marcar su {action} en el trabajo. Usa jerga técnica, metáforas de código "
+            #         f"(git, syntax, runtime, shutdown, startup, merge) o chistes de dev. Máximo 15 palabras."
+            #     )
+            #     response = model.generate_content(prompt)
+            #     greeting = response.text.strip()
+            # except Exception as e:
+            #     print(f"Error generating greeting: {e}")
+
+            return {
+                "status": "success", 
+                "user": user.full_name, 
+                "message": f"{action.capitalize()} registrada",
+                "greeting": greeting
+            }
 
     return {"status": "fail", "message": "User not recognized"}
 
@@ -168,7 +202,37 @@ async def login_manual(
             db.add(new_session)
 
     db.commit()
-    return {"status": "success", "user": user.full_name, "message": f"{action.capitalize()} manual registrada"}
+
+    # Gemini Greeting disabled by user request
+    greeting = ""
+    # try:
+    #     model = genai.GenerativeModel("gemini-2.5-flash")
+    #     tipo_mensaje = "saludo de BIENVENIDA" if action == "entrada" else "mensaje de DESPEDIDA"
+    #     prompt = (
+    #         f"Genera un {tipo_mensaje} corto, creativo y orientado a PROGRAMADORES/DEVS para {user.full_name} "
+    #         f"que acaba de marcar su {action} manual en el trabajo. Usa jerga técnica, metáforas de código "
+    #         f"(git, syntax, runtime, shutdown, startup, merge) o chistes de dev. Máximo 15 palabras."
+    #     )
+    #     response = model.generate_content(prompt)
+    #     greeting = response.text.strip()
+    # except Exception as e:
+    #     print(f"Error generating greeting: {e}")
+
+    return {
+        "status": "success", 
+        "user": user.full_name, 
+        "message": f"{action.capitalize()} manual registrada",
+        "greeting": greeting
+    }
+
+@app.post("/ai/test")
+async def ai_test(prompt: str = Form(...)):
+    try:
+        model = genai.GenerativeModel("gemini-2.5-flash")
+        response = model.generate_content(prompt)
+        return {"response": response.text}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 if __name__ == "__main__":
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    uvicorn.run(app, host="0.0.0.0", port=8001)
