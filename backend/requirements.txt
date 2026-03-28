@@ -1,0 +1,9 @@
+fastapi
+uvicorn
+face_recognition
+numpy
+sqlalchemy
+pymysql
+cryptography
+python-multipart
+opencv-python-headless
