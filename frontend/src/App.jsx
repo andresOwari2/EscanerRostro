@@ -3,7 +3,7 @@ import Webcam from 'react-webcam'
 import axios from 'axios'
 import { Camera, User, LogIn, CheckCircle, AlertCircle, RefreshCw, Smartphone } from 'lucide-react'
 
-const API_BASE = "http://localhost:8001"
+const API_BASE = import.meta.env.VITE_API_URL || "https://escanerrostro-2.onrender.com"
 
 export default function App() {
   const [view, setView] = useState('menu') // menu, attendance, register, manual
