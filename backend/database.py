@@ -6,9 +6,17 @@ import os
 
 # Using MariaDB (XAMPP) - Default: root without password on localhost
 # Format: mysql+pymysql://user:password@host:port/dbname
-# Using MariaDB (XAMPP) - Default: root without password on localhost
-# Format: mysql+pymysql://user:password@host:port/dbname
-DATABASE_URL = os.getenv("DATABASE_URL", "mysql+pymysql://root@localhost/asistencia_rostros")
+# Using MariaDB (XAMPP) locally or PostgreSQL in Render
+# Render provides DATABASE_URL in environment
+DATABASE_URL = os.getenv("DATABASE_URL")
+
+if DATABASE_URL:
+    # Render uses "postgres://" which SQLAlchemy 1.4+ doesn't like, needs "postgresql://"
+    if DATABASE_URL.startswith("postgres://"):
+        DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql://", 1)
+else:
+    # Default local MySQL
+    DATABASE_URL = "mysql+pymysql://root@localhost/asistencia_rostros"
 
 engine = create_engine(DATABASE_URL)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
