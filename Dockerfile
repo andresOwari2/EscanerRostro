@@ -24,8 +24,8 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 # Create models directory and download YuNet/SFace models
 RUN mkdir -p /app/backend/models && \
-    curl -L https://github.com/opencv/opencv_zoo/raw/master/models/face_detection_yunet/face_detection_yunet_2023mar.onnx -o /app/backend/models/yunet.onnx && \
-    curl -L https://github.com/opencv/opencv_zoo/raw/master/models/face_recognition_sface/face_recognition_sface_2021dec.onnx -o /app/backend/models/sface.onnx
+    curl -L https://github.com/opencv/opencv_zoo/raw/main/models/face_detection_yunet/face_detection_yunet_2023mar.onnx -o /app/backend/models/yunet.onnx && \
+    curl -L https://github.com/opencv/opencv_zoo/raw/main/models/face_recognition_sface/face_recognition_sface_2021dec.onnx -o /app/backend/models/sface.onnx
 
 # Copy the entire backend source code
 COPY backend /app/backend

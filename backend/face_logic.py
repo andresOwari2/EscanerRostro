@@ -4,6 +4,7 @@ import base64
 import io
 import os
 import sys
+import urllib.request
 
 # Setup logging for face logic
 import logging
@@ -19,20 +20,67 @@ SFACE_PATH = os.path.join(MODELS_DIR, "sface.onnx")
 _detector = None
 _recognizer = None
 
+def _download_model(url, path):
+    logger.info(f"Downloading model from {url} to {path}...")
+    try:
+        # User current folder models might be readonly in some envs, but Render /app is writable
+        urllib.request.urlretrieve(url, path)
+        logger.info("Download complete.")
+        return True
+    except Exception as e:
+        logger.error(f"Download failed: {e}")
+        return False
+
+def _ensure_models_exist():
+    os.makedirs(MODELS_DIR, exist_ok=True)
+    
+    models = {
+        YUNET_PATH: "https://github.com/opencv/opencv_zoo/raw/main/models/face_detection_yunet/face_detection_yunet_2023mar.onnx",
+        SFACE_PATH: "https://github.com/opencv/opencv_zoo/raw/main/models/face_recognition_sface/face_recognition_sface_2021dec.onnx"
+    }
+    
+    for path, url in models.items():
+        needs_download = False
+        if not os.path.exists(path):
+            logger.info(f"Model {path} missing.")
+            needs_download = True
+        else:
+            size = os.path.getsize(path)
+            # HTML error pages are small. YuNet is ~300KB, SFace is ~14MB
+            if size < 50000: 
+                logger.warning(f"Model {path} is too small ({size} bytes), likely corrupt.")
+                needs_download = True
+            else:
+                # Extra check: is it HTML?
+                try:
+                    with open(path, 'rb') as f:
+                        header = f.read(100)
+                        if b"<!DOCTYPE html>" in header or b"<html>" in header:
+                            logger.warning(f"Model {path} contains HTML, likely a 404 page.")
+                            needs_download = True
+                except:
+                    pass
+        
+        if needs_download:
+            if not _download_model(url, path):
+                raise FileNotFoundError(f"Failed to download required model: {url}")
+
 def _get_models():
     global _detector, _recognizer
     if _detector is None or _recognizer is None:
-        if not os.path.exists(YUNET_PATH) or not os.path.exists(SFACE_PATH):
-            logger.error(f"Models not found at {MODELS_DIR}. Please ensure yunet.onnx and sface.onnx are present.")
-            raise FileNotFoundError("OpenCV Face models not found.")
+        # First ensure models are valid and present
+        _ensure_models_exist()
         
-        # YuNet for Detection
-        # Instance size will be set dynamically during detection
-        _detector = cv2.FaceDetectorYN.create(YUNET_PATH, "", (320, 320))
-        
-        # SFace for Recognition
-        _recognizer = cv2.FaceRecognizerSF.create(SFACE_PATH, "")
-        logger.info("OpenCV Face Models loaded successfully.")
+        try:
+            # YuNet for Detection
+            _detector = cv2.FaceDetectorYN.create(YUNET_PATH, "", (320, 320))
+            
+            # SFace for Recognition
+            _recognizer = cv2.FaceRecognizerSF.create(SFACE_PATH, "")
+            logger.info("OpenCV Face Models loaded successfully.")
+        except Exception as e:
+            logger.error(f"FATAL: Error creating OpenCV models: {e}")
+            raise e
     
     return _detector, _recognizer
 
