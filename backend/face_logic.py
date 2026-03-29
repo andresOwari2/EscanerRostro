@@ -131,8 +131,8 @@ def get_face_position(image_bytes):
         face_height = bbox[3]
         height_ratio = face_height / h
         distance_status = "ok"
-        if height_ratio < 0.25: distance_status = "too_far"
-        elif height_ratio > 0.55: distance_status = "too_close"
+        if height_ratio < 0.20: distance_status = "too_far" # Más permisivo
+        elif height_ratio > 0.70: distance_status = "too_close" # Más permisivo
 
         # Points
         left_eye = landmarks[0]
@@ -151,9 +151,9 @@ def get_face_position(image_bytes):
 
         # Pose Thresholds (Tuned for YuNet)
         position = "front"
-        if ratio_lr < 0.65: position = "left"
-        elif ratio_lr > 1.55: position = "right"
-        elif dist_y < (face_height * 0.15): position = "up"
+        if ratio_lr < 0.60: position = "left" # Ajuste de umbral
+        elif ratio_lr > 1.65: position = "right" # Ajuste de umbral
+        elif dist_y < (face_height * 0.12): position = "up" # Ajuste de umbral
         
         # Viz landmarks mapping for frontend
         viz_landmarks = {
@@ -174,4 +174,11 @@ def get_face_position(image_bytes):
         
     except Exception as e:
         logger.error(f"Error estimating position: {e}")
-        return {"position": "unknown"}
+        return {
+            "position": "unknown",
+            "distance": "error",
+            "ratio_lr": 1.0,
+            "dist_y": 0.0,
+            "box": None,
+            "landmarks": None
+        }

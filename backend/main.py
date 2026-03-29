@@ -94,6 +94,8 @@ async def check_face(
         pos_data = face_logic.get_face_position(img_bytes)
         
         detected_pos = pos_data["position"]
+        logger.info(f"Face check: detected={detected_pos}, distance={pos_data['distance']}")
+        
         return {
             "face_detected": (detected_pos == target_pos and pos_data["distance"] == "ok"),
             "detected_pos": detected_pos,
@@ -106,6 +108,7 @@ async def check_face(
             "landmarks": pos_data.get("landmarks")
         }
     except Exception as e:
+        logger.error(f"Error in check_face: {e}\n{traceback.format_exc()}")
         return {"face_detected": False, "detected_pos": "error", "message": str(e)}
 
 @app.post("/register")
@@ -160,6 +163,7 @@ async def verify(
     unknown_encoding = face_logic.get_face_encoding(img_bytes)
     
     if not unknown_encoding:
+        logger.warning("Verify: No face encoding extracted from image")
         raise HTTPException(status_code=400, detail="No face detected in camera")
 
     # This is a naive implementation: fetch all vectors and compare

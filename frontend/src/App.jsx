@@ -10,7 +10,7 @@ export default function App() {
   const [attendanceAction, setAttendanceAction] = useState('entrada') // entrada, salida
   const [status, setStatus] = useState({ type: '', msg: '' })
   const [loading, setLoading] = useState(false)
-  
+
   const [regStep, setRegStep] = useState(0)
   const [regImages, setRegImages] = useState([])
   const [welcomeMsg, setWelcomeMsg] = useState('Asistencia Registrada')
@@ -21,7 +21,7 @@ export default function App() {
   const [landmarks, setLandmarks] = useState(null)
   const [loggedInUser, setLoggedInUser] = useState(null)
   const [greeting, setGreeting] = useState('')
-  
+
   const webcamRef = useRef(null)
 
   const speakGreeting = (text) => {
@@ -42,17 +42,17 @@ export default function App() {
   // Attendance Logic (Face Scan)
   const captureAndVerify = useCallback(async () => {
     if (!webcamRef.current || loading) return
-    
+
     setLoading(true)
     const imageSrc = webcamRef.current.getScreenshot()
-    
+
     try {
       const formData = new FormData()
       formData.append('image', imageSrc)
       formData.append('action', attendanceAction)
-      
+
       const res = await axios.post(`${API_BASE}/verify`, formData)
-      
+
       if (res.data.status === 'success') {
         setLoggedInUser(res.data.user)
         setWelcomeMsg(res.data.message)
@@ -87,14 +87,14 @@ export default function App() {
     if (!imageSrc) return
 
     const targetPos = ["front", "left", "right", "up"][regStep]
-    
+
     try {
       const formData = new FormData()
       formData.append('image', imageSrc)
       formData.append('target_pos', targetPos)
-      
+
       const res = await axios.post(`${API_BASE}/register/check_face`, formData)
-      
+
       if (res.data.metrics) {
         setPoseMetrics(res.data.metrics)
         setDistStatus(res.data.distance_status)
@@ -168,7 +168,7 @@ export default function App() {
       formData.append('username', userData.username)
       formData.append('password', userData.password)
       formData.append('action', attendanceAction)
-      
+
       const res = await axios.post(`${API_BASE}/login_manual`, formData)
       setLoggedInUser(res.data.user)
       setWelcomeMsg(res.data.message)
@@ -222,17 +222,17 @@ export default function App() {
                 <div className="face-guide-frame"></div>
                 {distStatus === 'too_far' && <div className="guide-alert animate-pulse">¡Acércate más!</div>}
                 {distStatus === 'too_close' && <div className="guide-alert animate-pulse">¡Aléjate un poco!</div>}
-                
+
                 {regStep === 1 && poseMetrics.ratio_lr <= 1.25 && <div className="guide-arrow left">← Gira a la Izquierda</div>}
                 {regStep === 2 && poseMetrics.ratio_lr >= 0.8 && <div className="guide-arrow right">Gira a la Derecha →</div>}
-                
+
                 {distStatus === 'ok' && (
                   <div className="guide-ok-badge">Rostro en posición</div>
                 )}
-                
+
                 {/* Visualización de Vectores Faciales */}
                 {landmarks && (
-                  <svg 
+                  <svg
                     className="landmarks-overlay"
                     viewBox="0 0 640 480"
                     preserveAspectRatio="xMidYMid slice"
@@ -266,7 +266,7 @@ export default function App() {
               <User size={18} style={{ marginRight: '8px' }} /> Registro de Rostro
             </button>
             <button className="btn btn-secondary" onClick={() => setView('manual')}>
-               Manual
+              Manual
             </button>
           </div>
         </div>
@@ -283,21 +283,21 @@ export default function App() {
           {regStep < 3 && regImages.length < 3 ? (
             <>
               <div className="step-indicator">
-                {[0,1,2].map(i => <div key={i} className={`step-dot ${regStep === i ? 'active' : ''}`}></div>)}
+                {[0, 1, 2].map(i => <div key={i} className={`step-dot ${regStep === i ? 'active' : ''}`}></div>)}
               </div>
               <p style={{ textAlign: 'center', marginBottom: '16px', fontSize: '0.9rem', fontWeight: 'bold', color: 'var(--primary)' }}>
                 {regStep === 0 && "Mira de frente..."}
                 {regStep === 1 && "¡Bien! Ahora gira a la izquierda..."}
                 {regStep === 2 && "¡Excelente! Ahora gira a la derecha..."}
               </p>
-              
+
               <div className="pose-guide">
                 <div className="gauge-container">
                   <div className="gauge-label">Giro</div>
                   <div className="gauge-bar">
-                    <div 
-                      className="gauge-indicator" 
-                      style={{ 
+                    <div
+                      className="gauge-indicator"
+                      style={{
                         left: `${Math.min(Math.max((poseMetrics.ratio_lr - 0.5) * 100 / 1.5, 0), 100)}%`,
                         backgroundColor: (regStep === 1 && poseMetrics.ratio_lr > 1.25) || (regStep === 2 && poseMetrics.ratio_lr < 0.8) || (regStep === 0 && poseMetrics.ratio_lr >= 0.8 && poseMetrics.ratio_lr <= 1.25) ? 'var(--accent)' : 'var(--primary)'
                       }}
@@ -316,22 +316,22 @@ export default function App() {
             <div className="registration-form">
               <div className="input-group">
                 <label>Nombre Completo</label>
-                <input type="text" value={userData.fullName} onChange={e => setUserData({...userData, fullName: e.target.value})} placeholder="Ej. Juan Pérez" />
+                <input type="text" value={userData.fullName} onChange={e => setUserData({ ...userData, fullName: e.target.value })} placeholder="Ej. Juan Pérez" />
               </div>
               <div className="input-group">
                 <label>Usuario</label>
-                <input type="text" value={userData.username} onChange={e => setUserData({...userData, username: e.target.value})} placeholder="juan.perez" />
+                <input type="text" value={userData.username} onChange={e => setUserData({ ...userData, username: e.target.value })} placeholder="juan.perez" />
               </div>
               <div className="input-group">
                 <label>Contraseña</label>
-                <input type="password" value={userData.password} onChange={e => setUserData({...userData, password: e.target.value})} placeholder="••••••••" />
+                <input type="password" value={userData.password} onChange={e => setUserData({ ...userData, password: e.target.value })} placeholder="••••••••" />
               </div>
               <button className="btn btn-primary" onClick={handleRegister} disabled={loading}>
                 {loading ? <RefreshCw className="animate-spin" /> : "Finalizar Registro"}
               </button>
             </div>
           )}
-          <button className="btn btn-secondary" style={{ marginTop: '12px' }} onClick={() => {setView('attendance'); resetReg();}}>Cancelar</button>
+          <button className="btn btn-secondary" style={{ marginTop: '12px' }} onClick={() => { setView('attendance'); resetReg(); }}>Cancelar</button>
         </div>
       )}
 
@@ -339,11 +339,11 @@ export default function App() {
         <form onSubmit={handleManualLogin}>
           <div className="input-group">
             <label>Usuario</label>
-            <input type="text" value={userData.username} required onChange={e => setUserData({...userData, username: e.target.value})} />
+            <input type="text" value={userData.username} required onChange={e => setUserData({ ...userData, username: e.target.value })} />
           </div>
           <div className="input-group">
             <label>Contraseña</label>
-            <input type="password" value={userData.password} required onChange={e => setUserData({...userData, password: e.target.value})} />
+            <input type="password" value={userData.password} required onChange={e => setUserData({ ...userData, password: e.target.value })} />
           </div>
           <button type="submit" className="btn btn-primary" disabled={loading}>
             {loading ? <RefreshCw className="animate-spin" /> : "Ingresar"}
@@ -362,10 +362,10 @@ export default function App() {
             {loggedInUser}
           </p>
           {greeting && (
-            <p style={{ 
-              fontSize: '1.1rem', 
-              color: 'var(--accent)', 
-              marginBottom: '30px', 
+            <p style={{
+              fontSize: '1.1rem',
+              color: 'var(--accent)',
+              marginBottom: '30px',
               fontStyle: 'italic',
               padding: '10px 20px',
               borderLeft: '4px solid var(--accent)',
