@@ -133,8 +133,8 @@ def compare_faces(known_encodings, unknown_encoding, tolerance=0.363):
         
         for known_enc in known_encodings:
             known_feat = np.array([known_enc], dtype=np.float32)
-            # match returns a cosine similarity score
-            score = recognizer.match(known_feat, unknown_feat, cv2.FR_COSINE)
+            # match returns a cosine similarity score (0 = FR_COSINE)
+            score = recognizer.match(known_feat, unknown_feat, 0)
             if score >= tolerance:
                 return True
         return False
