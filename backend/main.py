@@ -33,7 +33,7 @@ import uvicorn
 import datetime
 
 from sqlalchemy import text
-from database import init_db, get_db, User, FaceVector, AttendanceLog, AttendanceSession, Project, Survey
+from database import init_db, get_db, User, FaceVector, AttendanceLog, AttendanceSession, Project, Survey, SessionLocal
 import face_logic
 app = FastAPI(title="Face Attendance API")
 
@@ -49,41 +49,47 @@ app.add_middleware(
 def startup():
     logger.info("--- APPLICATION STARTUP ---")
     try:
-        logger.info("Initializing database...")
+        logger.info("Step 1: Initializing database tables (metadata.create_all)...")
         init_db()
+        logger.info("Step 1: OK")
         
-        # Auto-migration for existing tables
-        db = next(get_db())
+        # Auto-migration for existing tables using a manual session
+        logger.info("Step 2: Checking schema migrations...")
+        session = SessionLocal()
         try:
-            db.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS is_admin INTEGER DEFAULT 0"))
-            db.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS monthly_salary INTEGER DEFAULT 0"))
-            db.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS project_id INTEGER"))
-            db.commit()
-            logger.info("Database migration (columns) successful.")
+            # PostgreSQL syntax for IF NOT EXISTS
+            session.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS is_admin INTEGER DEFAULT 0"))
+            session.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS monthly_salary INTEGER DEFAULT 0"))
+            session.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS project_id INTEGER"))
+            session.commit()
+            logger.info("Step 2: OK (Schema verified)")
         except Exception as migrate_error:
-            logger.warning(f"Migration warning (likely columns already exist): {migrate_error}")
-            db.rollback()
+            logger.warning(f"Step 2: Migration warning: {migrate_error}")
+            session.rollback()
 
         # Create default admin if not exists
-        db = next(get_db())
-        admin = db.query(User).filter(User.username == "admin").first()
+        logger.info("Step 3: Verifying default admin user...")
+        admin = session.query(User).filter(User.username == "admin").first()
         if not admin:
-            logger.info("Creating default admin user...")
             new_admin = User(
                 username="admin", 
-                password_hash="1234", # In production use hashing
+                password_hash="1234", 
                 full_name="Administrador Sistema",
                 is_admin=1
             )
-            db.add(new_admin)
-            db.commit()
-            logger.info("Admin user created successfully.")
+            session.add(new_admin)
+            session.commit()
+            logger.info("Step 3: Default admin created (admin / 1234)")
+        else:
+            logger.info("Step 3: Admin already exists")
         
-        logger.info("Database initialized successfully.")
+        session.close()
+        logger.info("--- DATABASE READY ---")
     except Exception as e:
-        logger.error(f"FATAL: Database initialization failed: {e}")
+        logger.error(f"FATAL during startup: {e}")
+        logger.error(traceback.format_exc())
     
-    logger.info("Startup sequence complete.")
+    logger.info("Startup sequence finished. Application ready for traffic.")
     
 @app.get("/")
 def health_check():
@@ -91,16 +97,14 @@ def health_check():
 
 @app.post("/register/check_face")
 async def check_face(
-    image: str = Form(...), # Base64 image
-    target_pos: str = Form(...) # front, left, right, up
+    image: str = Form(...),
+    target_pos: str = Form(...)
 ):
     try:
         img_bytes = face_logic.decode_base64_image(image)
         pos_data = face_logic.get_face_position(img_bytes)
         
         detected_pos = pos_data["position"]
-        logger.info(f"Face check: detected={detected_pos}, distance={pos_data['distance']}")
-        
         return {
             "face_detected": (detected_pos == target_pos and pos_data["distance"] == "ok"),
             "detected_pos": detected_pos,
@@ -113,7 +117,7 @@ async def check_face(
             "landmarks": pos_data.get("landmarks")
         }
     except Exception as e:
-        logger.error(f"Error in check_face: {e}\n{traceback.format_exc()}")
+        logger.error(f"Error in check_face: {e}")
         return {"face_detected": False, "detected_pos": "error", "message": str(e)}
 
 @app.post("/register")
@@ -121,21 +125,18 @@ async def register(
     username: str = Form(...),
     password: str = Form(...),
     full_name: str = Form(...),
-    images: list[str] = Form(...), # List of base64 images
+    images: list[str] = Form(...),
     db: Session = Depends(get_db)
 ):
-    # Check if user exists
     existing_user = db.query(User).filter(User.username == username).first()
     if existing_user:
         raise HTTPException(status_code=400, detail="Username already registered")
 
-    # Create User
-    new_user = User(username=username, password_hash=password, full_name=full_name) # In production use hashing
+    new_user = User(username=username, password_hash=password, full_name=full_name)
     db.add(new_user)
     db.commit()
     db.refresh(new_user)
 
-    # Process Images and Extract Vectors
     vectors_saved = 0
     for i, base64_img in enumerate(images):
         img_bytes = face_logic.decode_base64_image(base64_img)
@@ -150,7 +151,6 @@ async def register(
             vectors_saved += 1
     
     if vectors_saved < 1:
-        # Rollback user if no face found in any image
         db.delete(new_user)
         db.commit()
         raise HTTPException(status_code=400, detail="No face detected in provided images")
@@ -160,15 +160,14 @@ async def register(
 
 @app.post("/verify")
 async def verify(
-    image: str = Form(...), # Base64 image
-    action: str = Form("entrada"), # entrada or salida
+    image: str = Form(...),
+    action: str = Form("entrada"),
     db: Session = Depends(get_db)
 ):
     img_bytes = face_logic.decode_base64_image(image)
     unknown_encoding = face_logic.get_face_encoding(img_bytes)
     
     if not unknown_encoding:
-        logger.warning("Verify: No face encoding extracted from image")
         raise HTTPException(status_code=400, detail="No face detected in camera")
 
     all_vectors = db.query(FaceVector).all()
@@ -289,9 +288,7 @@ async def delete_project(project_id: int, db: Session = Depends(get_db)):
     if not proj:
         raise HTTPException(status_code=404, detail="Proyecto no hallado")
     
-    # Set users project_id to NULL before deleting
     db.query(User).filter(User.project_id == project_id).update({User.project_id: None})
-    
     db.delete(proj)
     db.commit()
     return {"message": "Proyecto eliminado", "status": "success"}
@@ -362,7 +359,6 @@ async def get_reports(project_id: int, period: str = "monthly", db: Session = De
         prev_surveys = db.query(Survey).filter(Survey.user_id == u.id, Survey.timestamp >= prev_start_date, Survey.timestamp < start_date).all()
         
         def avg_score(survs):
-            if not survs: return 0
             return sum([s.productivity for s in survs]) / len(survs) if survs else 0
 
         curr_avg = avg_score(current_surveys)
@@ -381,8 +377,7 @@ async def get_reports(project_id: int, period: str = "monthly", db: Session = De
             "hours": round(total_hours, 2),
             "productivity": round(curr_avg, 2),
             "trend": trend,
-            "estimated_cost": round(expense, 2),
-            "salary": u.monthly_salary
+            "estimated_cost": round(expense, 2)
         })
         
     return report_data
