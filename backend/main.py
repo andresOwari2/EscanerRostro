@@ -19,6 +19,12 @@ if os.path.exists(env_path):
 else:
     logger.info("No local .env file found, using system environment variables")
 
+# Add backend to sys.path so backend modules can be found
+backend_dir = os.path.dirname(os.path.abspath(__file__))
+if backend_dir not in sys.path:
+    sys.path.insert(0, backend_dir)
+    logger.info(f"Added {backend_dir} to sys.path")
+
 from fastapi import FastAPI, Depends, HTTPException, UploadFile, File, Form
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
