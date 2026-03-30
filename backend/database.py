@@ -28,6 +28,9 @@ class User(Base):
     username = Column(String(50), unique=True, index=True, nullable=False)
     password_hash = Column(String(255), nullable=False)
     full_name = Column(String(100))
+    is_admin = Column(Integer, default=0) # 0=False, 1=True
+    monthly_salary = Column(Integer, default=0) # Total monthly salary
+    project_id = Column(Integer, ForeignKey("projects.id", ondelete="SET NULL"), nullable=True)
     created_at = Column(DateTime, default=datetime.datetime.utcnow)
 
 class FaceVector(Base):
@@ -47,6 +50,8 @@ class AttendanceLog(Base):
     action = Column(String(20), default="entrada") # entrada or salida
     status = Column(String(20), default="success")
 
+    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+
 class AttendanceSession(Base):
     __tablename__ = "attendance_sessions"
     id = Column(Integer, primary_key=True, index=True)
@@ -54,6 +59,29 @@ class AttendanceSession(Base):
     check_in = Column(DateTime, nullable=True)
     check_out = Column(DateTime, nullable=True)
     created_at = Column(DateTime, default=datetime.datetime.utcnow)
+
+class Project(Base):
+    __tablename__ = "projects"
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String(100), nullable=False)
+    description = Column(String(255), nullable=True)
+    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+
+class Survey(Base):
+    __tablename__ = "surveys"
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"))
+    project_id = Column(Integer, ForeignKey("projects.id", ondelete="CASCADE"))
+    
+    # 1-5 ratings for programmers
+    productivity = Column(Integer)     # Code volume / Speed
+    quality = Column(Integer)          # Bugs / Refactors
+    teamwork = Column(Integer)         # Collaboration
+    problem_solving = Column(Integer)  # Logic / Bug fixing
+    punctuality = Column(Integer)      # Deadlines
+    
+    comments = Column(String(255), nullable=True)
+    timestamp = Column(DateTime, default=datetime.datetime.utcnow)
 
 def init_db():
     Base.metadata.create_all(bind=engine)

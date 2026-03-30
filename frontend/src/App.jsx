@@ -1,7 +1,7 @@
 import React, { useState, useRef, useCallback, useEffect } from 'react'
 import Webcam from 'react-webcam'
 import axios from 'axios'
-import { Camera, User, LogIn, CheckCircle, AlertCircle, RefreshCw, Smartphone } from 'lucide-react'
+import { Camera, User, LogIn, CheckCircle, AlertCircle, RefreshCw, Smartphone, BarChart, Users, Settings, Briefcase, Star, TrendingUp, DollarSign } from 'lucide-react'
 
 const API_BASE = import.meta.env.VITE_API_URL || "https://escanerrostro-2.onrender.com"
 
@@ -21,6 +21,13 @@ export default function App() {
   const [landmarks, setLandmarks] = useState(null)
   const [loggedInUser, setLoggedInUser] = useState(null)
   const [greeting, setGreeting] = useState('')
+  const [adminAuth, setAdminAuth] = useState(false)
+  const [adminView, setAdminView] = useState('dash') // dash, projects, surveys, reports
+  const [adminData, setAdminData] = useState({ users: [], projects: [], reports: [] })
+  const [selectedProjectId, setSelectedProjectId] = useState('')
+  const [tempSurvey, setTempSurvey] = useState({ 
+    user_id: '', productivity: 3, quality: 3, teamwork: 3, problem_solving: 3, punctuality: 3, comments: '' 
+  })
 
   const webcamRef = useRef(null)
 
@@ -183,6 +190,65 @@ export default function App() {
     }
   }
 
+  // --- ADMIN LOGIC ---
+  const handleAdminLogin = (e) => {
+    e.preventDefault()
+    // Using simple credentials for thesis purposes
+    if (userData.username === 'admin' && userData.password === '1234') {
+      setAdminAuth(true)
+      fetchAdminData()
+      setAdminView('dash')
+      showStatus('success', 'Sesión de Administrador iniciada')
+    } else {
+      showStatus('error', 'Credenciales de Admin incorrectas')
+    }
+  }
+
+  const fetchAdminData = async () => {
+    try {
+      const [uRes, pRes] = await Promise.all([
+        axios.get(`${API_BASE}/admin/users`),
+        axios.get(`${API_BASE}/admin/projects`)
+      ])
+      setAdminData(prev => ({ ...prev, users: uRes.data, projects: pRes.data }))
+    } catch (err) { console.error(err) }
+  }
+
+  const fetchReports = async (pid, pType) => {
+    if (!pid) return
+    try {
+      const res = await axios.get(`${API_BASE}/admin/reports?project_id=${pid}&period=${pType}`)
+      setAdminData(prev => ({ ...prev, reports: res.data }))
+    } catch (err) { showStatus('error', 'Error cargando reportes') }
+  }
+
+  const handleCreateProject = async (name) => {
+    const fd = new FormData(); fd.append('name', name);
+    await axios.post(`${API_BASE}/admin/projects`, fd)
+    fetchAdminData()
+  }
+
+  const handleAssignProject = async (uid, pid) => {
+    const fd = new FormData(); fd.append('user_id', uid); fd.append('project_id', pid);
+    await axios.post(`${API_BASE}/admin/assign`, fd)
+    fetchAdminData()
+  }
+
+  const handleUpdateSalary = async (uid, salary) => {
+    const fd = new FormData(); fd.append('user_id', uid); fd.append('salary', salary);
+    await axios.post(`${API_BASE}/admin/salary`, fd)
+    fetchAdminData()
+  }
+
+  const handleSubmitSurvey = async () => {
+    const fd = new FormData()
+    Object.keys(tempSurvey).forEach(k => fd.append(k, tempSurvey[k]))
+    fd.append('project_id', selectedProjectId)
+    await axios.post(`${API_BASE}/admin/surveys`, fd)
+    showStatus('success', 'Encuesta enviada')
+    setAdminView('dash')
+  }
+
   // Auto-return from welcome to attendance
   useEffect(() => {
     let timeout
@@ -196,10 +262,148 @@ export default function App() {
   }, [view])
 
   return (
-    <div className="glass-card">
+    <div className="glass-card main-container">
       <h1>Escaner Facial</h1>
       <p className="subtitle">
-        {view === 'menu' && 'Bienvenido, selecciona una opción'}
+        {view === 'admin' && 'Panel de Administración y Reportes'}
+      {/* Admin View */}
+      {view === 'admin' && !adminAuth && (
+        <div className="admin-login-box">
+          <h3>Ingreso Administrativo</h3>
+          <form onSubmit={handleAdminLogin}>
+            <div className="input-group">
+              <label>Usuario Master</label>
+              <input type="text" onChange={e => setUserData({ ...userData, username: e.target.value })} />
+            </div>
+            <div className="input-group">
+              <label>Pin de Acceso</label>
+              <input type="password" onChange={e => setUserData({ ...userData, password: e.target.value })} />
+            </div>
+            <button className="btn btn-primary">Entrar al Panel</button>
+            <button className="btn btn-secondary" style={{marginTop:'10px'}} onClick={() => setView('menu')}>Salir</button>
+          </form>
+        </div>
+      )}
+
+      {view === 'admin' && adminAuth && (
+        <div className="admin-dashboard">
+          <div className="admin-nav">
+            <button className={adminView === 'dash' ? 'active' : ''} onClick={() => setAdminView('dash')}><BarChart size={18}/> Dash</button>
+            <button className={adminView === 'projects' ? 'active' : ''} onClick={() => setAdminView('projects')}><Briefcase size={18}/> Proyectos</button>
+            <button className={adminView === 'surveys' ? 'active' : ''} onClick={() => setAdminView('surveys')}><Star size={18}/> Encuestas</button>
+            <button className={adminView === 'reports' ? 'active' : ''} onClick={() => setAdminView('reports')}><TrendingUp size={18}/> Reportes</button>
+            <button onClick={() => setView('menu')}><LogIn size={18}/> Cerrar</button>
+          </div>
+
+          <div className="admin-content">
+            {adminView === 'dash' && (
+              <div className="stats-grid">
+                <div className="stat-card">
+                  <Users size={24} color="var(--primary)"/>
+                  <div className="stat-val">{adminData.users.length}</div>
+                  <div className="stat-lbl">Usuarios</div>
+                </div>
+                <div className="stat-card">
+                  <Briefcase size={24} color="var(--accent)"/>
+                  <div className="stat-val">{adminData.projects.length}</div>
+                  <div className="stat-lbl">Proyectos</div>
+                </div>
+              </div>
+            )}
+
+            {adminView === 'projects' && (
+              <div className="admin-sections">
+                <h4>Crear Proyecto</h4>
+                <div className="inline-form">
+                  <input type="text" id="newProjName" placeholder="Nombre Proyecto" />
+                  <button onClick={() => handleCreateProject(document.getElementById('newProjName').value)}>Crear</button>
+                </div>
+                <h4 style={{marginTop:'20px'}}>Asignar Trabajadores</h4>
+                <div className="users-list-admin">
+                  {adminData.users.filter(u => !u.is_admin).map(u => (
+                    <div key={u.id} className="user-admin-row">
+                      <span>{u.full_name}</span>
+                      <select defaultValue={u.project_id || ''} onChange={(e) => handleAssignProject(u.id, e.target.value)}>
+                        <option value="">Sin Proyecto</option>
+                        {adminData.projects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+                      </select>
+                      <input type="number" defaultValue={u.monthly_salary} onBlur={(e) => handleUpdateSalary(u.id, e.target.value)} placeholder="Sueldo" />
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {adminView === 'surveys' && (
+              <div className="admin-sections">
+                <select onChange={(e) => setSelectedProjectId(e.target.value)}>
+                   <option value="">Selecciona Proyecto</option>
+                   {adminData.projects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+                </select>
+                {selectedProjectId && (
+                  <div className="survey-users">
+                    {adminData.users.filter(u => u.project_id == selectedProjectId).map(u => (
+                      <div key={u.id} className="survey-card">
+                        <h5>{u.full_name}</h5>
+                        <div className="rating-group">
+                          <label>Productividad</label>
+                          <div className="stars">
+                            {[1,2,3,4,5].map(i => (
+                              <input key={i} type="radio" name={`prod-${u.id}`} checked={tempSurvey.user_id === u.id && tempSurvey.productivity === i} onChange={() => setTempSurvey({...tempSurvey, user_id: u.id, productivity: i})} />
+                            ))}
+                          </div>
+                        </div>
+                        <button className="btn btn-primary btn-sm" onClick={handleSubmitSurvey}>Enviar</button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {adminView === 'reports' && (
+              <div className="admin-sections">
+                 <div className="report-controls">
+                    <select id="repProj" onChange={(e) => setSelectedProjectId(e.target.value)}>
+                        <option value="">Proyecto</option>
+                        {adminData.projects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+                    </select>
+                    <select id="repTime">
+                        <option value="weekly">Semanal</option>
+                        <option value="monthly">Mensual</option>
+                        <option value="annual">Anual</option>
+                    </select>
+                    <button onClick={() => fetchReports(selectedProjectId, document.getElementById('repTime').value)}>Generar</button>
+                 </div>
+                 <div className="reports-table-container">
+                    <table className="admin-table">
+                        <thead>
+                            <tr>
+                                <th>Nombre</th>
+                                <th>Horas</th>
+                                <th>Prod.</th>
+                                <th>Tendencia</th>
+                                <th>Gasto Est.</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {adminData.reports.map(r => (
+                                <tr key={r.user_id}>
+                                    <td>{r.name}</td>
+                                    <td>{r.hours}h</td>
+                                    <td>{r.productivity}</td>
+                                    <td className={`trend-${r.trend}`}>{r.trend === 'up' ? '↑ Mejoró' : r.trend === 'down' ? '↓ Bajó' : '↔ Estable'}</td>
+                                    <td>${r.estimated_cost}</td>
+                                </tr>
+                            ))}
+                        </tbody>
+                    </table>
+                 </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
         {view === 'attendance' && `Escaneando Rostro para ${attendanceAction.toUpperCase()}`}
         {view === 'register' && `Escaneo de Registro - Posición ${regStep + 1}/3`}
         {view === 'manual' && `Ingreso Manual - ${attendanceAction.toUpperCase()}`}
@@ -269,6 +473,9 @@ export default function App() {
               Manual
             </button>
           </div>
+          <button className="btn-admin-access" onClick={() => setView('admin')}>
+            <Settings size={14} /> Acceso Admin
+          </button>
         </div>
       )}
 

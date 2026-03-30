@@ -2,46 +2,16 @@ import sys
 import os
 import logging
 import traceback
+from dotenv import load_dotenv
 
-# Setup logging ASAP for Render diagnostics
+# Setup logging ASAP
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
 
-logger.info(f"--- RENDER STARTUP DIAGNOSTICS ---")
-logger.info(f"CWD: {os.getcwd()}")
-logger.info(f"Python Version: {sys.version}")
-
-# Add backend to path robustly
-backend_dir = os.path.dirname(os.path.abspath(__file__))
-if backend_dir not in sys.path:
-    sys.path.insert(0, backend_dir)
-    logger.info(f"Added {backend_dir} to sys.path")
-
-# The system now uses OpenCV (YuNet + SFace) instead of dlib to reduce RAM usage.
-try:
-    import cv2
-    logger.info(f"OpenCV version: {cv2.__version__}")
-except ImportError:
-    logger.error("OpenCV not found in environment")
-
-from fastapi import FastAPI, Depends, HTTPException, UploadFile, File, Form
-from fastapi.middleware.cors import CORSMiddleware
-from sqlalchemy.orm import Session
-import json
-import uvicorn
-
-from database import init_db, get_db, User, FaceVector, AttendanceLog, AttendanceSession
-import face_logic
-import datetime
-import os
-from dotenv import load_dotenv
-import google.generativeai as genai
-
-# Load environment variables from .env file ONLY if they are not already set in the system
-# This prevents a local .env file from overriding Render's environment variables
+# Load environment variables FIRST before database imports
 env_path = os.path.join(os.path.dirname(__file__), "..", ".env")
 if os.path.exists(env_path):
     load_dotenv(env_path, override=False)
@@ -49,13 +19,15 @@ if os.path.exists(env_path):
 else:
     logger.info("No local .env file found, using system environment variables")
 
-# Configure Gemini
-api_key = os.getenv("gemini_APIKEY")
-if api_key:
-    genai.configure(api_key=api_key)
-else:
-    print("Warning: gemini_APIKEY not found in environment variables")
+from fastapi import FastAPI, Depends, HTTPException, UploadFile, File, Form
+from fastapi.middleware.cors import CORSMiddleware
+from sqlalchemy.orm import Session
+import json
+import uvicorn
+import datetime
 
+from database import init_db, get_db, User, FaceVector, AttendanceLog, AttendanceSession, Project, Survey
+import face_logic
 app = FastAPI(title="Face Attendance API")
 
 # Enable CORS for React frontend
@@ -72,6 +44,22 @@ def startup():
     try:
         logger.info("Initializing database...")
         init_db()
+        
+        # Create default admin if not exists
+        db = next(get_db())
+        admin = db.query(User).filter(User.username == "admin").first()
+        if not admin:
+            logger.info("Creating default admin user...")
+            new_admin = User(
+                username="admin", 
+                password_hash="1234", # In production use hashing
+                full_name="Administrador Sistema",
+                is_admin=1
+            )
+            db.add(new_admin)
+            db.commit()
+            logger.info("Admin user created successfully.")
+        
         logger.info("Database initialized successfully.")
     except Exception as e:
         logger.error(f"FATAL: Database initialization failed: {e}")
@@ -291,3 +279,122 @@ if __name__ == "__main__":
     # Render assigns a dynamic port via the PORT environment variable
     port = int(os.environ.get("PORT", 8001))
     uvicorn.run(app, host="0.0.0.0", port=port)
+
+# --- ADMIN ENDPOINTS ---
+
+@app.get("/admin/users")
+async def get_admin_users(db: Session = Depends(get_db)):
+    users = db.query(User).all()
+    return [{
+        "id": u.id,
+        "username": u.username,
+        "full_name": u.full_name,
+        "monthly_salary": u.monthly_salary,
+        "is_admin": u.is_admin,
+        "project_id": u.project_id
+    } for u in users]
+
+@app.get("/admin/projects")
+async def get_projects(db: Session = Depends(get_db)):
+    return db.query(Project).all()
+
+@app.post("/admin/projects")
+async def create_project(name: str = Form(...), description: str = Form(""), db: Session = Depends(get_db)):
+    project = Project(name=name, description=description)
+    db.add(project)
+    db.commit()
+    return {"message": "Proyecto creado"}
+
+@app.post("/admin/assign")
+async def assign_project(user_id: int = Form(...), project_id: int = Form(...), db: Session = Depends(get_db)):
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user: raise HTTPException(status_code=404, detail="Usuario no encontrado")
+    user.project_id = project_id
+    db.commit()
+    return {"message": "Proyecto asignado"}
+
+@app.post("/admin/salary")
+async def update_salary(user_id: int = Form(...), salary: int = Form(...), db: Session = Depends(get_db)):
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user: raise HTTPException(status_code=404, detail="Usuario no encontrado")
+    user.monthly_salary = salary
+    db.commit()
+    return {"message": "Sueldo actualizado"}
+
+@app.post("/admin/surveys")
+async def submit_survey(
+    user_id: int = Form(...),
+    project_id: int = Form(...),
+    productivity: int = Form(...),
+    quality: int = Form(...),
+    teamwork: int = Form(...),
+    problem_solving: int = Form(...),
+    punctuality: int = Form(...),
+    comments: str = Form(""),
+    db: Session = Depends(get_db)
+):
+    survey = Survey(
+        user_id=user_id, project_id=project_id,
+        productivity=productivity, quality=quality, teamwork=teamwork,
+        problem_solving=problem_solving, punctuality=punctuality,
+        comments=comments
+    )
+    db.add(survey)
+    db.commit()
+    return {"message": "Encuesta guardada"}
+
+@app.get("/admin/reports")
+async def get_reports(project_id: int, period: str = "monthly", db: Session = Depends(get_db)):
+    users = db.query(User).filter(User.project_id == project_id).all()
+    now = datetime.datetime.utcnow()
+    
+    if period == "weekly": delta = datetime.timedelta(days=7)
+    elif period == "monthly": delta = datetime.timedelta(days=30)
+    else: delta = datetime.timedelta(days=365)
+    
+    start_date = now - delta
+    prev_start_date = start_date - delta
+    
+    report_data = []
+    for u in users:
+        # 1. Total Hours
+        sessions = db.query(AttendanceSession).filter(
+            AttendanceSession.user_id == u.id,
+            AttendanceSession.check_in >= start_date
+        ).all()
+        total_seconds = 0
+        for s in sessions:
+            if s.check_in and s.check_out:
+                total_seconds += (s.check_out - s.check_in).total_seconds()
+        total_hours = total_seconds / 3600
+        
+        # 2. Avg Survey Productivity
+        current_surveys = db.query(Survey).filter(Survey.user_id == u.id, Survey.timestamp >= start_date).all()
+        prev_surveys = db.query(Survey).filter(Survey.user_id == u.id, Survey.timestamp >= prev_start_date, Survey.timestamp < start_date).all()
+        
+        def avg_score(survs):
+            if not survs: return 0
+            return sum([s.productivity + s.quality + s.teamwork + s.problem_solving + s.punctuality for s in survs]) / (len(survs) * 5)
+
+        curr_avg = avg_score(current_surveys)
+        prev_avg = avg_score(prev_surveys)
+        
+        trend = "stable"
+        if curr_avg > prev_avg + 0.2: trend = "up"
+        elif curr_avg < prev_avg - 0.2: trend = "down"
+        
+        # 3. Estimated Expenses (Salary/160 hours * actual hours)
+        hourly_cost = u.monthly_salary / 160
+        expense = hourly_cost * total_hours
+        
+        report_data.append({
+            "user_id": u.id,
+            "name": u.full_name,
+            "hours": round(total_hours, 2),
+            "productivity": round(curr_avg, 2),
+            "trend": trend,
+            "estimated_cost": round(expense, 2),
+            "salary": u.monthly_salary
+        })
+        
+    return report_data
