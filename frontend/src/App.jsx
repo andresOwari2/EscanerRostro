@@ -1,13 +1,35 @@
 import React, { useState, useEffect, useRef } from 'react'
 import axios from 'axios'
 import { 
-  LogIn, LogOut, UserPlus, Settings, BarChart, 
+  LogIn, LogOut, UserPlus, Settings, BarChart as BarChartIcon, 
   Briefcase, Star, TrendingUp, Users, CheckCircle, 
-  AlertCircle, Keyboard, RefreshCw, Smartphone, User, Trash2
+  AlertCircle, Keyboard, RefreshCw, Smartphone, User, Trash2, PieChart as PieChartIcon
 } from 'lucide-react'
 import Webcam from 'react-webcam'
+import { 
+  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, 
+  ResponsiveContainer, AreaChart, Area, PieChart, Pie, Cell 
+} from 'recharts'
 
 const API_BASE = 'https://escanerrostro-2.onrender.com'
+
+const CHART_COLORS = ['#6366f1', '#a855f7', '#22d3ee', '#f43f5e', '#fbbf24', '#10b981']
+
+const CustomTooltip = ({ active, payload, label }) => {
+  if (active && payload && payload.length) {
+    return (
+      <div className="custom-tooltip">
+        <p className="label">{label}</p>
+        {payload.map((pld, index) => (
+          <p key={index} style={{ color: pld.color }}>
+            {pld.name}: <span className="value">{pld.value}</span>
+          </p>
+        ))}
+      </div>
+    );
+  }
+  return null;
+};
 
 function App() {
   const [view, setView] = useState('menu')
@@ -23,6 +45,7 @@ function App() {
   const [selectedProjectId, setSelectedProjectId] = useState('')
   const [tempSurvey, setTempSurvey] = useState({ user_id: '', productivity: 1 })
   const [attendanceAction, setAttendanceAction] = useState('entrada')
+  const [reportMode, setReportMode] = useState('table') // 'table' | 'charts'
 
   // Webcam & Face Logic Refs
   const webcamRef = useRef(null)
@@ -181,6 +204,15 @@ function App() {
     return () => clearTimeout(timeout)
   }, [view])
 
+  // Chart Data Processing
+  const chartData = adminData.reports.map(r => ({
+    name: r.name.split(' ')[0], // Use first name for space
+    fullName: r.name,
+    horas: r.hours,
+    productivity: r.productivity,
+    costo: r.estimated_cost
+  }));
+
   return (
     <div className={(view === 'admin' && adminAuth) ? "admin-full-layout" : "glass-card main-container"}>
       {view === 'admin' && adminAuth ? (
@@ -192,7 +224,7 @@ function App() {
             </div>
             <div className="sidebar-nav">
               <button className={adminView === 'dash' ? 'active' : ''} onClick={() => setAdminView('dash')}>
-                <BarChart size={20}/> Dashboard
+                <BarChartIcon size={20}/> Dashboard
               </button>
               <button className={adminView === 'projects' ? 'active' : ''} onClick={() => setAdminView('projects')}>
                 <Briefcase size={20}/> Gestión Proyectos
@@ -201,7 +233,7 @@ function App() {
                 <Star size={20}/> Encuestas
               </button>
               <button className={adminView === 'reports' ? 'active' : ''} onClick={() => setAdminView('reports')}>
-                <TrendingUp size={20}/> Reportes Proyectados
+                <TrendingUp size={20}/> Reportes Visuales
               </button>
             </div>
             <div className="sidebar-footer">
@@ -217,7 +249,7 @@ function App() {
             <header className="admin-header">
               <h3>{adminView === 'dash' ? 'Resumen General' : 
                    adminView === 'projects' ? 'Gestión de Proyectos y Sueldos' : 
-                   adminView === 'surveys' ? 'Calificación de Programadores' : 'Reportes de Productividad'}</h3>
+                   adminView === 'surveys' ? 'Calificación de Programadores' : 'Dashboard de Productividad'}</h3>
             </header>
             
             <div className="admin-scroll-content">
@@ -358,36 +390,106 @@ function App() {
                       <button className="btn btn-accent" onClick={() => fetchReports(selectedProjectId, document.getElementById('repTime').value)}>
                         Generar Reporte
                       </button>
+
+                      <div className="view-toggle">
+                        <button className={reportMode === 'table' ? 'active' : ''} onClick={() => setReportMode('table')}>Tabla</button>
+                        <button className={reportMode === 'charts' ? 'active' : ''} onClick={() => setReportMode('charts')}>Gráficos</button>
+                      </div>
                    </div>
                    
-                   <div className="admin-table-container">
-                      <table className="admin-table">
-                          <thead>
-                              <tr>
-                                  <th>Colaborador</th>
-                                  <th>Horas Totales</th>
-                                  <th>Prom. Prod.</th>
-                                  <th>Tendencia</th>
-                                  <th>Gasto Proyectado</th>
-                              </tr>
-                          </thead>
-                          <tbody>
-                              {adminData.reports.map(r => (
-                                  <tr key={r.user_id}>
-                                      <td>{r.name}</td>
-                                      <td>{r.hours} hr</td>
-                                      <td>{r.productivity} / 5</td>
-                                      <td className={`trend-${r.trend}`}>
-                                        <div className="trend-badge">
-                                          {r.trend === 'up' ? '📈 ALTA' : r.trend === 'down' ? '📉 BAJA' : '📊 ESTABLE'}
-                                        </div>
-                                      </td>
-                                      <td className="cost-val">${r.estimated_cost}</td>
-                                  </tr>
-                              ))}
-                          </tbody>
-                      </table>
-                   </div>
+                   {reportMode === 'table' ? (
+                     <div className="admin-table-container">
+                        <table className="admin-table">
+                            <thead>
+                                <tr>
+                                    <th>Colaborador</th>
+                                    <th>Horas Totales</th>
+                                    <th>Prom. Prod.</th>
+                                    <th>Tendencia</th>
+                                    <th>Gasto Proyectado</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {adminData.reports.map(r => (
+                                    <tr key={r.user_id}>
+                                        <td>{r.name}</td>
+                                        <td>{r.hours} hr</td>
+                                        <td>{r.productivity} / 5</td>
+                                        <td className={`trend-${r.trend}`}>
+                                          <div className="trend-badge">
+                                            {r.trend === 'up' ? '📈 ALTA' : r.trend === 'down' ? '📉 BAJA' : '📊 ESTABLE'}
+                                          </div>
+                                        </td>
+                                        <td className="cost-val">${r.estimated_cost}</td>
+                                    </tr>
+                                ))}
+                            </tbody>
+                        </table>
+                     </div>
+                   ) : (
+                     <div className="charts-grid">
+                        <div className="chart-card">
+                          <h4><BarChartIcon size={18}/> Horas Trabajadas</h4>
+                          <div style={{width:'100%', height:300}}>
+                            <ResponsiveContainer>
+                              <BarChart data={chartData}>
+                                <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" />
+                                <XAxis dataKey="name" stroke="#94a3b8" fontSize={12} />
+                                <YAxis stroke="#94a3b8" fontSize={12} />
+                                <Tooltip content={<CustomTooltip />} />
+                                <Bar dataKey="horas" fill="var(--primary)" radius={[4, 4, 0, 0]} />
+                              </BarChart>
+                            </ResponsiveContainer>
+                          </div>
+                        </div>
+
+                        <div className="chart-card">
+                          <h4><TrendingUp size={18}/> Nivel de Productividad</h4>
+                          <div style={{width:'100%', height:300}}>
+                            <ResponsiveContainer>
+                              <AreaChart data={chartData}>
+                                <defs>
+                                  <linearGradient id="colorProd" x1="0" y1="0" x2="0" y2="1">
+                                    <stop offset="5%" stopColor="var(--accent)" stopOpacity={0.3}/>
+                                    <stop offset="95%" stopColor="var(--accent)" stopOpacity={0}/>
+                                  </linearGradient>
+                                </defs>
+                                <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" />
+                                <XAxis dataKey="name" stroke="#94a3b8" fontSize={12} />
+                                <YAxis stroke="#94a3b8" fontSize={12} domain={[0, 5]} />
+                                <Tooltip content={<CustomTooltip />} />
+                                <Area type="monotone" dataKey="productivity" stroke="var(--accent)" fillOpacity={1} fill="url(#colorProd)" />
+                              </AreaChart>
+                            </ResponsiveContainer>
+                          </div>
+                        </div>
+
+                        <div className="chart-card">
+                          <h4><PieChartIcon size={18}/> Distribución de Costos ($)</h4>
+                          <div style={{width:'100%', height:300}}>
+                            <ResponsiveContainer>
+                              <PieChart>
+                                <Pie
+                                  data={chartData}
+                                  dataKey="costo"
+                                  nameKey="name"
+                                  cx="50%"
+                                  cy="50%"
+                                  outerRadius={80}
+                                  label
+                                >
+                                  {chartData.map((entry, index) => (
+                                    <Cell key={`cell-${index}`} fill={CHART_COLORS[index % CHART_COLORS.length]} />
+                                  ))}
+                                </Pie>
+                                <Tooltip content={<CustomTooltip />} />
+                                <Legend />
+                              </PieChart>
+                            </ResponsiveContainer>
+                          </div>
+                        </div>
+                     </div>
+                   )}
                 </div>
               )}
             </div>
