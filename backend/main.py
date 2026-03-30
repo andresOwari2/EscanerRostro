@@ -82,8 +82,6 @@ def startup():
         logger.info("Database initialized successfully.")
     except Exception as e:
         logger.error(f"FATAL: Database initialization failed: {e}")
-        # We don't raise here to allow the process to stay alive 
-        # so we can see the logs in Render, or let the health check fail naturally.
     
     logger.info("Startup sequence complete.")
     
@@ -173,8 +171,6 @@ async def verify(
         logger.warning("Verify: No face encoding extracted from image")
         raise HTTPException(status_code=400, detail="No face detected in camera")
 
-    # This is a naive implementation: fetch all vectors and compare
-    # In a real system, you'd use a vector DB or optimize this.
     all_vectors = db.query(FaceVector).all()
     
     for vec in all_vectors:
@@ -182,16 +178,13 @@ async def verify(
         if face_logic.compare_faces([known_encoding], unknown_encoding, tolerance=0.4):
             user = db.query(User).filter(User.id == vec.user_id).first()
             
-            # Register in General Log
             log = AttendanceLog(user_id=user.id, method="face", action=action)
             db.add(log)
             
-            # Manage Session
             if action == "entrada":
                 new_session = AttendanceSession(user_id=user.id, check_in=datetime.datetime.utcnow())
                 db.add(new_session)
             else:
-                # Find last open session to close
                 last_session = db.query(AttendanceSession).filter(
                     AttendanceSession.user_id == user.id, 
                     AttendanceSession.check_out == None
@@ -200,32 +193,15 @@ async def verify(
                 if last_session:
                     last_session.check_out = datetime.datetime.utcnow()
                 else:
-                    # Orphan exit
                     new_session = AttendanceSession(user_id=user.id, check_out=datetime.datetime.utcnow())
                     db.add(new_session)
             
             db.commit()
-            
-            # Gemini Greeting disabled by user request
-            greeting = "" 
-            # try:
-            #     model = genai.GenerativeModel("gemini-2.5-flash")
-            #     tipo_mensaje = "saludo de BIENVENIDA" if action == "entrada" else "mensaje de DESPEDIDA"
-            #     prompt = (
-            #         f"Genera un {tipo_mensaje} corto, creativo y orientado a PROGRAMADORES/DEVS para {user.full_name} "
-            #         f"que acaba de marcar su {action} en el trabajo. Usa jerga técnica, metáforas de código "
-            #         f"(git, syntax, runtime, shutdown, startup, merge) o chistes de dev. Máximo 15 palabras."
-            #     )
-            #     response = model.generate_content(prompt)
-            #     greeting = response.text.strip()
-            # except Exception as e:
-            #     print(f"Error generating greeting: {e}")
-
             return {
                 "status": "success", 
                 "user": user.full_name, 
                 "message": f"{action.capitalize()} registrada",
-                "greeting": greeting
+                "greeting": ""
             }
 
     return {"status": "fail", "message": "User not recognized"}
@@ -241,11 +217,9 @@ async def login_manual(
     if not user:
         raise HTTPException(status_code=401, detail="Invalid credentials")
     
-    # Register manual in General Log
     log = AttendanceLog(user_id=user.id, method="manual", action=action)
     db.add(log)
     
-    # Manage Session
     if action == "entrada":
         new_session = AttendanceSession(user_id=user.id, check_in=datetime.datetime.utcnow())
         db.add(new_session)
@@ -263,39 +237,24 @@ async def login_manual(
 
     db.commit()
 
-    # Gemini Greeting disabled by user request
-    greeting = ""
-    # try:
-    #     model = genai.GenerativeModel("gemini-2.5-flash")
-    #     tipo_mensaje = "saludo de BIENVENIDA" if action == "entrada" else "mensaje de DESPEDIDA"
-    #     prompt = (
-    #         f"Genera un {tipo_mensaje} corto, creativo y orientado a PROGRAMADORES/DEVS para {user.full_name} "
-    #         f"que acaba de marcar su {action} manual en el trabajo. Usa jerga técnica, metáforas de código "
-    #         f"(git, syntax, runtime, shutdown, startup, merge) o chistes de dev. Máximo 15 palabras."
-    #     )
-    #     response = model.generate_content(prompt)
-    #     greeting = response.text.strip()
-    # except Exception as e:
-    #     print(f"Error generating greeting: {e}")
-
     return {
         "status": "success", 
         "user": user.full_name, 
         "message": f"{action.capitalize()} manual registrada",
-        "greeting": greeting
+        "greeting": ""
     }
 
 @app.post("/ai/test")
 async def ai_test(prompt: str = Form(...)):
     try:
-        model = genai.GenerativeModel("gemini-2.5-flash")
+        import google.generativeai as genai
+        model = genai.GenerativeModel("gemini-1.5-flash")
         response = model.generate_content(prompt)
         return {"response": response.text}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 if __name__ == "__main__":
-    # Render assigns a dynamic port via the PORT environment variable
     port = int(os.environ.get("PORT", 8001))
     uvicorn.run(app, host="0.0.0.0", port=port)
 
@@ -322,13 +281,26 @@ async def create_project(name: str = Form(...), description: str = Form(""), db:
     project = Project(name=name, description=description)
     db.add(project)
     db.commit()
-    return {"message": "Proyecto creado"}
+    return {"message": "Proyecto creado", "status": "success"}
+
+@app.delete("/admin/projects/{project_id}")
+async def delete_project(project_id: int, db: Session = Depends(get_db)):
+    proj = db.query(Project).filter(Project.id == project_id).first()
+    if not proj:
+        raise HTTPException(status_code=404, detail="Proyecto no hallado")
+    
+    # Set users project_id to NULL before deleting
+    db.query(User).filter(User.project_id == project_id).update({User.project_id: None})
+    
+    db.delete(proj)
+    db.commit()
+    return {"message": "Proyecto eliminado", "status": "success"}
 
 @app.post("/admin/assign")
 async def assign_project(user_id: int = Form(...), project_id: int = Form(...), db: Session = Depends(get_db)):
     user = db.query(User).filter(User.id == user_id).first()
     if not user: raise HTTPException(status_code=404, detail="Usuario no encontrado")
-    user.project_id = project_id
+    user.project_id = project_id if project_id != 0 else None
     db.commit()
     return {"message": "Proyecto asignado"}
 
@@ -376,7 +348,6 @@ async def get_reports(project_id: int, period: str = "monthly", db: Session = De
     
     report_data = []
     for u in users:
-        # 1. Total Hours
         sessions = db.query(AttendanceSession).filter(
             AttendanceSession.user_id == u.id,
             AttendanceSession.check_in >= start_date
@@ -387,13 +358,12 @@ async def get_reports(project_id: int, period: str = "monthly", db: Session = De
                 total_seconds += (s.check_out - s.check_in).total_seconds()
         total_hours = total_seconds / 3600
         
-        # 2. Avg Survey Productivity
         current_surveys = db.query(Survey).filter(Survey.user_id == u.id, Survey.timestamp >= start_date).all()
         prev_surveys = db.query(Survey).filter(Survey.user_id == u.id, Survey.timestamp >= prev_start_date, Survey.timestamp < start_date).all()
         
         def avg_score(survs):
             if not survs: return 0
-            return sum([s.productivity + s.quality + s.teamwork + s.problem_solving + s.punctuality for s in survs]) / (len(survs) * 5)
+            return sum([s.productivity for s in survs]) / len(survs) if survs else 0
 
         curr_avg = avg_score(current_surveys)
         prev_avg = avg_score(prev_surveys)
@@ -402,7 +372,6 @@ async def get_reports(project_id: int, period: str = "monthly", db: Session = De
         if curr_avg > prev_avg + 0.2: trend = "up"
         elif curr_avg < prev_avg - 0.2: trend = "down"
         
-        # 3. Estimated Expenses (Salary/160 hours * actual hours)
         hourly_cost = u.monthly_salary / 160
         expense = hourly_cost * total_hours
         

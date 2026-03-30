@@ -3,11 +3,11 @@ import axios from 'axios'
 import { 
   LogIn, LogOut, UserPlus, Settings, BarChart, 
   Briefcase, Star, TrendingUp, Users, CheckCircle, 
-  AlertCircle, Keyboard, RefreshCw, Smartphone, User
+  AlertCircle, Keyboard, RefreshCw, Smartphone, User, Trash2
 } from 'lucide-react'
 import Webcam from 'react-webcam'
 
-const API_BASE = 'https://escanerrostro-2.onrender.com' // Ajustado al backend real
+const API_BASE = 'https://escanerrostro-2.onrender.com'
 
 function App() {
   const [view, setView] = useState('menu')
@@ -70,10 +70,22 @@ function App() {
 
   const handleCreateProject = async (name) => {
     if (!name) return
-    const fd = new FormData(); fd.append('name', name);
-    await axios.post(`${API_BASE}/admin/projects`, fd)
-    fetchAdminData()
-    showStatus('success', 'Proyecto creado')
+    try {
+      const fd = new FormData(); fd.append('name', name);
+      await axios.post(`${API_BASE}/admin/projects`, fd)
+      showStatus('success', `Proyecto "${name}" creado con éxito`)
+      document.getElementById('newProjName').value = ''
+      fetchAdminData()
+    } catch (err) { showStatus('error', 'Error creando proyecto') }
+  }
+
+  const handleDeleteProject = async (pid) => {
+    if (!window.confirm('¿Estás seguro de eliminar este proyecto? Los trabajadores quedarán sin proyecto asignado.')) return
+    try {
+      await axios.delete(`${API_BASE}/admin/projects/${pid}`)
+      showStatus('success', 'Proyecto eliminado')
+      fetchAdminData()
+    } catch (err) { showStatus('error', 'Error eliminando proyecto') }
   }
 
   const handleAssignProject = async (uid, pid) => {
@@ -90,17 +102,20 @@ function App() {
   }
 
   const handleSubmitSurvey = async () => {
+    if (!tempSurvey.user_id) return showStatus('error', 'Selecciona un usuario')
     const fd = new FormData()
     fd.append('user_id', tempSurvey.user_id)
     fd.append('productivity', tempSurvey.productivity)
-    fd.append('quality', 3) // Defaults for MVP
+    fd.append('quality', 3)
     fd.append('teamwork', 3)
     fd.append('problem_solving', 3)
     fd.append('punctuality', 3)
     fd.append('project_id', selectedProjectId)
     
-    await axios.post(`${API_BASE}/admin/surveys`, fd)
-    showStatus('success', 'Encuesta guardada')
+    try {
+      await axios.post(`${API_BASE}/admin/surveys`, fd)
+      showStatus('success', 'Evaluación guardada')
+    } catch (err) { showStatus('error', 'Error guardando encuesta') }
   }
 
   // --- ATTENDANCE & REGISTER LOGIC ---
@@ -113,8 +128,8 @@ function App() {
     fd.append('action', attendanceAction)
     
     try {
-      const res = await axios.post(`${API_BASE}/attendance/manual`, fd)
-      setLoggedInUser(res.data.full_name)
+      const res = await axios.post(`${API_BASE}/login_manual`, fd)
+      setLoggedInUser(res.data.user)
       setView('welcome')
     } catch (err) {
       showStatus('error', err.response?.data?.detail || 'Error en login manual')
@@ -127,7 +142,7 @@ function App() {
     if (regStep < 2) {
       setRegStep(regStep + 1)
     } else {
-      setRegStep(3) // Form view
+      setRegStep(3)
     }
   }
 
@@ -137,11 +152,11 @@ function App() {
     fd.append('username', userData.username)
     fd.append('password', userData.password)
     fd.append('full_name', userData.fullName)
-    regImages.forEach((img, i) => fd.append('images', img))
+    regImages.forEach((img) => fd.append('images', img))
 
     try {
       await axios.post(`${API_BASE}/register`, fd)
-      showStatus('success', 'Registro completado correctamente')
+      showStatus('success', 'Registro completado')
       resetReg()
       setView('menu')
     } catch (err) {
@@ -166,7 +181,6 @@ function App() {
     return () => clearTimeout(timeout)
   }, [view])
 
-  // --- RENDER ---
   return (
     <div className={(view === 'admin' && adminAuth) ? "admin-full-layout" : "glass-card main-container"}>
       {view === 'admin' && adminAuth ? (
@@ -198,6 +212,8 @@ function App() {
           </div>
 
           <div className="admin-main-view">
+            {status.msg && <div className={`status-msg status-${status.type}`} style={{position:'absolute', top:'20px', right:'20px', zIndex:100}}>{status.msg}</div>}
+            
             <header className="admin-header">
               <h3>{adminView === 'dash' ? 'Resumen General' : 
                    adminView === 'projects' ? 'Gestión de Proyectos y Sueldos' : 
@@ -227,6 +243,34 @@ function App() {
                     <div className="inline-form">
                       <input type="text" id="newProjName" placeholder="Nombre del Proyecto" />
                       <button className="btn btn-primary" style={{width:'auto'}} onClick={() => handleCreateProject(document.getElementById('newProjName').value)}>Crear Proyecto</button>
+                    </div>
+                  </div>
+
+                  <div className="section-card" style={{marginTop:'30px'}}>
+                    <h4>Listado de Proyectos</h4>
+                    <div className="admin-table-container">
+                      <table className="admin-table">
+                        <thead>
+                          <tr>
+                            <th>Nombre</th>
+                            <th>ID</th>
+                            <th>Acciones</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {adminData.projects.map(p => (
+                            <tr key={p.id}>
+                              <td>{p.name}</td>
+                              <td>{p.id}</td>
+                              <td>
+                                <button className="btn btn-secondary btn-sm" style={{color:'#f87171'}} onClick={() => handleDeleteProject(p.id)}>
+                                  <Trash2 size={16}/> Eliminar
+                                </button>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
                     </div>
                   </div>
 
@@ -290,7 +334,7 @@ function App() {
                                 ))}
                               </div>
                             </div>
-                            <button className="btn btn-primary" onClick={handleSubmitSurvey}>Guardar Evaluación</button>
+                            <button className="btn btn-primary" onClick={handleSubmitSurvey}>Enviar Calificación</button>
                           </div>
                         </div>
                       ))}
@@ -361,14 +405,8 @@ function App() {
           </p>
 
           <div className="content">
-            {/* Status Messages */}
-            {status.msg && (
-              <div className={`status-msg status-${status.type}`}>
-                {status.msg}
-              </div>
-            )}
+            {status.msg && <div className={`status-msg status-${status.type}`}>{status.msg}</div>}
 
-            {/* Main Menu */}
             {view === 'menu' && (
               <div className="menu-grid">
                 <button className="btn-menu entry" onClick={() => { setAttendanceAction('entrada'); setView('attendance'); }}>
@@ -393,7 +431,6 @@ function App() {
               </div>
             )}
 
-            {/* Attendance Face Scan */}
             {view === 'attendance' && (
               <div className="camera-container">
                 <div className="camera-wrapper">
@@ -416,7 +453,6 @@ function App() {
               </div>
             )}
 
-            {/* Register Face Scan */}
             {view === 'register' && (
               <div className="registration-flow">
                 <div className="step-indicator">
@@ -480,7 +516,6 @@ function App() {
               </div>
             )}
 
-            {/* Manual Attendance */}
             {view === 'manual' && (
               <div className="manual-form">
                 <div className="input-group">
@@ -496,7 +531,6 @@ function App() {
               </div>
             )}
 
-            {/* Welcome / Success View */}
             {view === 'welcome' && (
               <div className="welcome-screen">
                 <div className="success-icon">✅</div>
@@ -506,7 +540,6 @@ function App() {
               </div>
             )}
 
-            {/* Admin Login Overlay */}
             {view === 'admin' && !adminAuth && (
               <div className="admin-login-overlay">
                 <div className="admin-login-box">
