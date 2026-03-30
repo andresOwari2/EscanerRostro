@@ -32,6 +32,7 @@ import json
 import uvicorn
 import datetime
 
+from sqlalchemy import text
 from database import init_db, get_db, User, FaceVector, AttendanceLog, AttendanceSession, Project, Survey
 import face_logic
 app = FastAPI(title="Face Attendance API")
@@ -51,6 +52,18 @@ def startup():
         logger.info("Initializing database...")
         init_db()
         
+        # Auto-migration for existing tables
+        db = next(get_db())
+        try:
+            db.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS is_admin INTEGER DEFAULT 0"))
+            db.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS monthly_salary INTEGER DEFAULT 0"))
+            db.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS project_id INTEGER"))
+            db.commit()
+            logger.info("Database migration (columns) successful.")
+        except Exception as migrate_error:
+            logger.warning(f"Migration warning (likely columns already exist): {migrate_error}")
+            db.rollback()
+
         # Create default admin if not exists
         db = next(get_db())
         admin = db.query(User).filter(User.username == "admin").first()
