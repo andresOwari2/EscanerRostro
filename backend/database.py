@@ -1,6 +1,7 @@
-from sqlalchemy import create_engine, Column, Integer, String, ForeignKey, DateTime, Text
+from sqlalchemy import create_engine, Column, Integer, String, ForeignKey, DateTime, Text, Float, Boolean, Numeric
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
+from passlib.hash import bcrypt
 import datetime
 import os
 
@@ -28,6 +29,9 @@ class User(Base):
     username = Column(String(50), unique=True, index=True, nullable=False)
     password_hash = Column(String(255), nullable=False)
     full_name = Column(String(100))
+    dni = Column(String(20), unique=True, index=True)
+    base_salary = Column(Numeric(10, 2), default=0.0)
+    is_active = Column(Boolean, default=True)
     created_at = Column(DateTime, default=datetime.datetime.utcnow)
 
 class FaceVector(Base):
@@ -55,8 +59,52 @@ class AttendanceSession(Base):
     check_out = Column(DateTime, nullable=True)
     created_at = Column(DateTime, default=datetime.datetime.utcnow)
 
+class Admin(Base):
+    __tablename__ = "admins"
+    id = Column(Integer, primary_key=True, index=True)
+    username = Column(String(50), unique=True, nullable=False)
+    password_hash = Column(String(255), nullable=False) # In prod use hashing
+
+class WorkSchedule(Base):
+    __tablename__ = "work_schedules"
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"))
+    day_of_week = Column(Integer) # 0-6 (Mon-Sun)
+    start_time = Column(String(10)) # "08:00"
+    end_time = Column(String(10)) # "17:00"
+
+class ProductivityRating(Base):
+    __tablename__ = "productivity_ratings"
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"))
+    rating = Column(Integer) # 1-5
+    comment = Column(Text)
+    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+
+class CompanyGoal(Base):
+    __tablename__ = "company_goals"
+    id = Column(Integer, primary_key=True, index=True)
+    year = Column(Integer)
+    month = Column(Integer) # 0 for annual
+    target_revenue = Column(Numeric(15, 2))
+    achieved_revenue = Column(Numeric(15, 2), default=0.0)
+
 def init_db():
     Base.metadata.create_all(bind=engine)
+    
+    # Initialize superadmin
+    db = SessionLocal()
+    try:
+        admin = db.query(Admin).filter(Admin.username == "superadmin").first()
+        if not admin:
+            hashed_pass = pbkdf2_sha256.hash("123")
+            new_admin = Admin(username="superadmin", password_hash=hashed_pass)
+            db.add(new_admin)
+            db.commit()
+    except Exception as e:
+        print(f"Error seeding admin: {e}")
+    finally:
+        db.close()
 
 def get_db():
     db = SessionLocal()

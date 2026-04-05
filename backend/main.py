@@ -33,12 +33,24 @@ from sqlalchemy.orm import Session
 import json
 import uvicorn
 
-from database import init_db, get_db, User, FaceVector, AttendanceLog, AttendanceSession
+from database import init_db, get_db, User, FaceVector, AttendanceLog, AttendanceSession, Admin, WorkSchedule, ProductivityRating, CompanyGoal
 import face_logic
 import datetime
+from sqlalchemy import func, extract
+from decimal import Decimal
 import os
 from dotenv import load_dotenv
 import google.generativeai as genai
+from passlib.context import CryptContext
+
+# Auth setup
+pwd_context = CryptContext(schemes=["pbkdf2_sha256"], deprecated="auto")
+
+def verify_password(plain, hashed):
+    return pwd_context.verify(plain, hashed)
+
+def get_password_hash(password):
+    return pwd_context.hash(password)
 
 # Load environment variables from .env file ONLY if they are not already set in the system
 # This prevents a local .env file from overriding Render's environment variables
@@ -175,8 +187,21 @@ async def verify(
         if face_logic.compare_faces([known_encoding], unknown_encoding, tolerance=0.4):
             user = db.query(User).filter(User.id == vec.user_id).first()
             
+            if not user.is_active:
+                logger.warning(f"Verify: User {user.username} is inactive")
+                return {"status": "error", "title": "Cuenta Inactiva", "message": "Tu cuenta ha sido desactivada por el administrador.", "user": user.full_name}
+
+            # Determine Punctuality Status
+            attendance_status = "Puntual"
+            if action == "entrada":
+                schedule = db.query(WorkSchedule).filter(WorkSchedule.user_id == user.id).first()
+                if schedule:
+                    now_time = datetime.datetime.utcnow().time()
+                    if now_time > schedule.start_time:
+                        attendance_status = "Tardanza"
+
             # Register in General Log
-            log = AttendanceLog(user_id=user.id, method="face", action=action)
+            log = AttendanceLog(user_id=user.id, method="facial", action=action, status=attendance_status)
             db.add(log)
             
             # Manage Session with Strict Control
@@ -261,8 +286,17 @@ async def login_manual(
     if not user:
         raise HTTPException(status_code=401, detail="Invalid credentials")
     
+    # Determine Punctuality Status
+    attendance_status = "Puntual"
+    if action == "entrada":
+        schedule = db.query(WorkSchedule).filter(WorkSchedule.user_id == user.id).first()
+        if schedule:
+            now_time = datetime.datetime.utcnow().time()
+            if now_time > schedule.start_time:
+                attendance_status = "Tardanza"
+
     # Register manual in General Log
-    log = AttendanceLog(user_id=user.id, method="manual", action=action)
+    log = AttendanceLog(user_id=user.id, method="manual", action=action, status=attendance_status)
     db.add(log)
     
     # Manage Session with Strict Control
@@ -318,3 +352,134 @@ if __name__ == "__main__":
     # Render assigns a dynamic port via the PORT environment variable
     port = int(os.environ.get("PORT", 8001))
     uvicorn.run(app, host="0.0.0.0", port=port)
+
+# --- ADMIN ENDPOINTS ---
+
+@app.post("/admin/login")
+async def admin_login(username: str = Form(...), password: str = Form(...), db: Session = Depends(get_db)):
+    admin = db.query(Admin).filter(Admin.username == username).first()
+    if not admin or not verify_password(password, admin.password_hash):
+        raise HTTPException(status_code=401, detail="Credenciales de administrador inválidas")
+    return {"status": "success", "message": "Login exitoso", "admin": admin.username}
+
+@app.get("/admin/users")
+async def get_admin_users(db: Session = Depends(get_db)):
+    users = db.query(User).all()
+    result = []
+    for u in users:
+        result.append({
+            "id": u.id,
+            "username": u.username,
+            "full_name": u.full_name,
+            "dni": u.dni,
+            "base_salary": float(u.base_salary or 0),
+            "is_active": u.is_active,
+            "created_at": u.created_at
+        })
+    return result
+
+@app.put("/admin/users/{user_id}")
+async def update_user(
+    user_id: int,
+    full_name: str = Form(None),
+    dni: str = Form(None),
+    salary: float = Form(None),
+    is_active: bool = Form(None),
+    db: Session = Depends(get_db)
+):
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="Usuario no encontrado")
+    
+    if full_name: user.full_name = full_name
+    if dni: user.dni = dni
+    if salary is not None: user.base_salary = Decimal(str(salary))
+    if is_active is not None: user.is_active = is_active
+    
+    db.commit()
+    return {"message": "Usuario actualizado correctamente"}
+
+@app.post("/admin/ratings")
+async def rate_user(user_id: int = Form(...), rating: int = Form(...), comment: str = Form(""), db: Session = Depends(get_db)):
+    new_rating = ProductivityRating(user_id=user_id, rating=rating, comment=comment)
+    db.add(new_rating)
+    db.commit()
+    return {"message": "Calificación registrada"}
+
+@app.get("/admin/stats")
+async def get_stats(db: Session = Depends(get_db)):
+    # Simple attendance stats (this week)
+    today = datetime.datetime.utcnow()
+    start_of_week = today - datetime.timedelta(days=today.weekday())
+    
+    attendance_data = db.query(
+        func.date(AttendanceLog.timestamp).label('date'),
+        func.count(AttendanceLog.id).label('count')
+    ).filter(AttendanceLog.timestamp >= start_of_week).group_by(func.date(AttendanceLog.timestamp)).all()
+    
+    # Financial Stats (Simple mockup for now based on goals vs salaries)
+    total_salaries = db.query(func.sum(User.base_salary)).filter(User.is_active == True).scalar() or 0
+    current_goal = db.query(CompanyGoal).filter(CompanyGoal.year == today.year, CompanyGoal.month == today.month).first()
+    target = float(current_goal.target_revenue) if current_goal else 50000.0 # Default if none set
+    achieved = float(current_goal.achieved_revenue) if current_goal else 42000.0
+    
+    return {
+        "attendance": [{"date": str(d), "count": c} for d, c in attendance_data],
+        "financials": {
+            "total_expenses": float(total_salaries),
+            "target_revenue": target,
+            "achieved_revenue": achieved,
+            "profit": achieved - float(total_salaries)
+        }
+    }
+
+@app.post("/admin/goals")
+async def set_goal(year: int = Form(...), month: int = Form(...), target: float = Form(...), achieved: float = Form(None), db: Session = Depends(get_db)):
+    goal = db.query(CompanyGoal).filter(CompanyGoal.year == year, CompanyGoal.month == month).first()
+    if goal:
+        goal.target_revenue = Decimal(str(target))
+        if achieved is not None: goal.achieved_revenue = Decimal(str(achieved))
+    else:
+        goal = CompanyGoal(year=year, month=month, target_revenue=Decimal(str(target)), achieved_revenue=Decimal(str(achieved or 0)))
+        db.add(goal)
+    db.commit()
+    return {"message": "Meta actualizada"}
+
+@app.get("/admin/schedules")
+async def get_schedules(db: Session = Depends(get_db)):
+    schedules = db.query(WorkSchedule).all()
+    return [{
+        "user_id": s.user_id,
+        "start_time": s.start_time.strftime("%H:%M"),
+        "end_time": s.end_time.strftime("%H:%M")
+    } for s in schedules]
+
+@app.post("/admin/schedules")
+async def set_schedule(user_id: int = Form(...), start: str = Form(...), end: str = Form(...), db: Session = Depends(get_db)):
+    try:
+        s_time = datetime.datetime.strptime(start, "%H:%M").time()
+        e_time = datetime.datetime.strptime(end, "%H:%M").time()
+    except:
+        raise HTTPException(status_code=400, detail="Formato de hora inválido (HH:MM)")
+    
+    sched = db.query(WorkSchedule).filter(WorkSchedule.user_id == user_id).first()
+    if sched:
+        sched.start_time = s_time
+        sched.end_time = e_time
+    else:
+        sched = WorkSchedule(user_id=user_id, start_time=s_time, end_time=e_time)
+        db.add(sched)
+    db.commit()
+    return {"message": "Horario actualizado"}
+
+@app.get("/admin/logs")
+async def get_admin_logs(db: Session = Depends(get_db)):
+    logs = db.query(AttendanceLog, User).join(User, AttendanceLog.user_id == User.id).order_by(AttendanceLog.id.desc()).limit(100).all()
+    return [{
+        "id": l[0].id,
+        "user_name": l[1].full_name,
+        "timestamp": l[0].timestamp.strftime("%Y-%m-%d %H:%M:%S"),
+        "method": l[0].method,
+        "action": l[0].action,
+        "status": l[0].status or "Puntual"
+    } for l in logs]

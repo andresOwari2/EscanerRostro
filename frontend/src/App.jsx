@@ -1,12 +1,13 @@
 import React, { useState, useRef, useCallback, useEffect } from 'react'
 import Webcam from 'react-webcam'
 import axios from 'axios'
-import { Camera, User, LogIn, CheckCircle, AlertCircle, RefreshCw, Smartphone } from 'lucide-react'
+import { Camera, User, LogIn, CheckCircle, AlertCircle, RefreshCw, Smartphone, Settings } from 'lucide-react'
+import AdminPanel from './components/AdminPanel'
 
 const API_BASE = import.meta.env.VITE_API_URL || "http://localhost:8000"
 
 export default function App() {
-  const [view, setView] = useState('menu') // menu, attendance, register, manual
+  const [view, setView] = useState('menu') // menu, attendance, register, manual, admin
   const [attendanceAction, setAttendanceAction] = useState('entrada') // entrada, salida
   const [status, setStatus] = useState({ type: '', msg: '' })
   const [loading, setLoading] = useState(false)
@@ -219,7 +220,11 @@ export default function App() {
   }, [view])
 
   return (
-    <div className="glass-card">
+    <div className="app-container">
+      {view === 'admin' ? (
+        <AdminPanel onBack={() => setView('menu')} />
+      ) : (
+        <div className="glass-card">
       <h1>Escaner Facial</h1>
       <p className="subtitle">
         {view === 'menu' && 'Bienvenido, selecciona una opción'}
@@ -290,6 +295,9 @@ export default function App() {
             </button>
             <button className="btn btn-secondary" onClick={() => setView('manual')}>
               Manual
+            </button>
+            <button className="btn btn-admin" onClick={() => setView('admin')}>
+              <Settings size={18} style={{ marginRight: '8px' }} /> Admin
             </button>
           </div>
         </div>
@@ -413,6 +421,8 @@ export default function App() {
         <div className={`status-msg ${status.type === 'success' ? 'status-success' : 'status-error'}`}>
           {status.type === 'success' ? <CheckCircle size={18} inline /> : <AlertCircle size={18} inline />}
           <span style={{ marginLeft: '8px' }}>{status.msg}</span>
+        </div>
+      )}
         </div>
       )}
     </div>
