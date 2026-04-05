@@ -197,7 +197,14 @@ async def verify(
                 schedule = db.query(WorkSchedule).filter(WorkSchedule.user_id == user.id).first()
                 if schedule:
                     now_time = datetime.datetime.utcnow().time()
-                    if now_time > schedule.start_time:
+                    # Safe comparison: handle both time objects and strings
+                    sched_time = schedule.start_time
+                    if isinstance(sched_time, str):
+                        try:
+                            sched_time = datetime.datetime.strptime(sched_time[:5], "%H:%M").time()
+                        except: pass
+                    
+                    if hasattr(sched_time, 'strftime') and now_time > sched_time:
                         attendance_status = "Tardanza"
 
             # Register in General Log
@@ -450,8 +457,8 @@ async def get_schedules(db: Session = Depends(get_db)):
     schedules = db.query(WorkSchedule).all()
     return [{
         "user_id": s.user_id,
-        "start_time": s.start_time.strftime("%H:%M"),
-        "end_time": s.end_time.strftime("%H:%M")
+        "start_time": s.start_time.strftime("%H:%M") if hasattr(s.start_time, 'strftime') else str(s.start_time)[:5],
+        "end_time": s.end_time.strftime("%H:%M") if hasattr(s.end_time, 'strftime') else str(s.end_time)[:5]
     } for s in schedules]
 
 @app.post("/admin/schedules")
