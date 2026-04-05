@@ -3,7 +3,7 @@ import Webcam from 'react-webcam'
 import axios from 'axios'
 import { Camera, User, LogIn, CheckCircle, AlertCircle, RefreshCw, Smartphone } from 'lucide-react'
 
-const API_BASE = import.meta.env.VITE_API_URL || "https://escanerrostro-2.onrender.com"
+const API_BASE = import.meta.env.VITE_API_URL || "http://localhost:8000"
 
 export default function App() {
   const [view, setView] = useState('menu') // menu, attendance, register, manual
@@ -14,6 +14,7 @@ export default function App() {
   const [regStep, setRegStep] = useState(0)
   const [regImages, setRegImages] = useState([])
   const [welcomeMsg, setWelcomeMsg] = useState('Asistencia Registrada')
+  const [welcomeTitle, setWelcomeTitle] = useState('¡Operación Exitosa!')
   const [userData, setUserData] = useState({ username: '', password: '', fullName: '' })
   const [poseMetrics, setPoseMetrics] = useState({ ratio_lr: 1, dist_y: 20 })
   const [distStatus, setDistStatus] = useState('none')
@@ -21,6 +22,7 @@ export default function App() {
   const [landmarks, setLandmarks] = useState(null)
   const [loggedInUser, setLoggedInUser] = useState(null)
   const [greeting, setGreeting] = useState('')
+  const [gracePeriodActive, setGracePeriodActive] = useState(false)
 
   const webcamRef = useRef(null)
 
@@ -41,7 +43,7 @@ export default function App() {
 
   // Attendance Logic (Face Scan)
   const captureAndVerify = useCallback(async () => {
-    if (!webcamRef.current || loading) return
+    if (!webcamRef.current || loading || gracePeriodActive) return
 
     setLoading(true)
     const imageSrc = webcamRef.current.getScreenshot()
@@ -55,29 +57,49 @@ export default function App() {
 
       if (res.data.status === 'success') {
         setLoggedInUser(res.data.user)
+        setWelcomeTitle(res.data.title || '¡Operación Exitosa!')
         setWelcomeMsg(res.data.message)
         setGreeting(res.data.greeting || '')
         setView('welcome')
         showStatus('success', res.data.message)
         if (res.data.greeting) speakGreeting(res.data.greeting)
+      } else if (res.data.status === 'error') {
+        // Strict session validation error from backend
+        setLoggedInUser(res.data.user || null)
+        setWelcomeTitle(res.data.title || 'Atención')
+        setWelcomeMsg(res.data.message)
+        setView('welcome')
+        showStatus('error', res.data.message)
       } else {
-        showStatus('error', 'Rostro no reconocido / No estás registrado')
+        showStatus('error', res.data.message || 'Rostro no reconocido / No estás registrado')
       }
     } catch (err) {
       console.error(err)
+      showStatus('error', 'Error al conectar con el servidor')
     } finally {
       setLoading(false)
     }
-  }, [loading])
+  }, [loading, attendanceAction, gracePeriodActive])
 
-  // Auto-scan every 3 seconds if in attendance view
+  // Auto-scan cycle
   useEffect(() => {
     let interval
-    if (view === 'attendance') {
+    if (view === 'attendance' && !gracePeriodActive) {
       interval = setInterval(captureAndVerify, 4000)
     }
     return () => clearInterval(interval)
-  }, [view, captureAndVerify])
+  }, [view, captureAndVerify, gracePeriodActive])
+
+  // Grace Period Logic
+  useEffect(() => {
+    if (view === 'attendance') {
+      setGracePeriodActive(true)
+      const timer = setTimeout(() => {
+        setGracePeriodActive(false)
+      }, 2000)
+      return () => clearTimeout(timer)
+    }
+  }, [view])
 
   // Automatic Registration Logic
   const autoCaptureStep = useCallback(async () => {
@@ -171,6 +193,7 @@ export default function App() {
 
       const res = await axios.post(`${API_BASE}/login_manual`, formData)
       setLoggedInUser(res.data.user)
+      setWelcomeTitle(res.data.title || '¡Operación Exitosa!')
       setWelcomeMsg(res.data.message)
       setGreeting(res.data.greeting || '')
       setView('welcome')
@@ -183,14 +206,14 @@ export default function App() {
     }
   }
 
-  // Auto-return from welcome to attendance
+  // Auto-return from welcome to menu (inicio)
   useEffect(() => {
     let timeout
     if (view === 'welcome') {
       timeout = setTimeout(() => {
         setLoggedInUser(null)
         setView('menu')
-      }, 5000)
+      }, 3000) // Reduced to 3s for better UX
     }
     return () => clearTimeout(timeout)
   }, [view])
@@ -357,7 +380,7 @@ export default function App() {
           <div className="welcome-icon">
             <CheckCircle size={80} color="var(--accent)" style={{ margin: '0 auto 20px' }} />
           </div>
-          <h2 style={{ fontSize: '2rem', marginBottom: '10px' }}>¡Bienvenido!</h2>
+          <h2 style={{ fontSize: '2rem', marginBottom: '10px' }}>{welcomeTitle}</h2>
           <p style={{ fontSize: '1.5rem', fontWeight: 'bold', color: 'var(--primary)', marginBottom: '10px' }}>
             {loggedInUser}
           </p>
@@ -376,8 +399,8 @@ export default function App() {
             </p>
           )}
           <p style={{ color: 'var(--text-dim)', marginBottom: '20px' }}>{welcomeMsg}</p>
-          <button className="btn btn-primary" onClick={() => { setLoggedInUser(null); setView('attendance'); }}>
-            Cerrar Sesión
+          <button className="btn btn-primary" onClick={() => { setLoggedInUser(null); setView('menu'); }}>
+            Aceptar
           </button>
           <p style={{ fontSize: '0.8rem', color: 'var(--text-dim)', marginTop: '20px' }}>
             Regresando al escaner automáticamente en unos segundos...

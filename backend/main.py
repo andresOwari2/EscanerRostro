@@ -179,25 +179,44 @@ async def verify(
             log = AttendanceLog(user_id=user.id, method="face", action=action)
             db.add(log)
             
-            # Manage Session
+            # Manage Session with Strict Control
+            last_session = db.query(AttendanceSession).filter(
+                AttendanceSession.user_id == user.id, 
+                AttendanceSession.check_out == None
+            ).order_by(AttendanceSession.id.desc()).first()
+
             if action == "entrada":
+                if last_session:
+                    return {
+                        "status": "error",
+                        "title": "Sesión Activa",
+                        "message": f"{user.full_name}, ya tienes una entrada registrada. Debes marcar salida primero.",
+                        "user": user.full_name
+                    }
                 new_session = AttendanceSession(user_id=user.id, check_in=datetime.datetime.utcnow())
                 db.add(new_session)
+                msg_action = "entrada registrada"
+                title_action = "¡Bienvenido!"
             else:
-                # Find last open session to close
-                last_session = db.query(AttendanceSession).filter(
-                    AttendanceSession.user_id == user.id, 
-                    AttendanceSession.check_out == None
-                ).order_by(AttendanceSession.id.desc()).first()
-                
-                if last_session:
-                    last_session.check_out = datetime.datetime.utcnow()
-                else:
-                    # Orphan exit
-                    new_session = AttendanceSession(user_id=user.id, check_out=datetime.datetime.utcnow())
-                    db.add(new_session)
+                if not last_session:
+                    return {
+                        "status": "error",
+                        "title": "Sin Entrada",
+                        "message": f"{user.full_name}, no tienes ninguna entrada activa. Marca entrada primero.",
+                        "user": user.full_name
+                    }
+                last_session.check_out = datetime.datetime.utcnow()
+                msg_action = "salida registrada"
+                title_action = "¡Hasta pronto!"
             
             db.commit()
+            
+            return {
+                "status": "success",
+                "title": title_action,
+                "message": f"{user.full_name}, tu {msg_action} correctamente.",
+                "user": user.full_name
+            }
             
             # Gemini Greeting disabled by user request
             greeting = "" 
@@ -214,10 +233,18 @@ async def verify(
             # except Exception as e:
             #     print(f"Error generating greeting: {e}")
 
+            if action == "entrada":
+                title = "¡Bienvenido!"
+                msg = f"{user.full_name}, tu entrada ha sido registrada correctamente."
+            else:
+                title = "¡Hasta pronto!"
+                msg = f"{user.full_name}, tu salida ha sido registrada correctamente."
+
             return {
                 "status": "success", 
+                "title": title,
                 "user": user.full_name, 
-                "message": f"{action.capitalize()} registrada",
+                "message": msg,
                 "greeting": greeting
             }
 
@@ -238,44 +265,44 @@ async def login_manual(
     log = AttendanceLog(user_id=user.id, method="manual", action=action)
     db.add(log)
     
-    # Manage Session
+    # Manage Session with Strict Control
+    last_session = db.query(AttendanceSession).filter(
+        AttendanceSession.user_id == user.id, 
+        AttendanceSession.check_out == None
+    ).order_by(AttendanceSession.id.desc()).first()
+
     if action == "entrada":
+        if last_session:
+            return {
+                "status": "error",
+                "title": "Sesión Activa",
+                "message": f"{user.full_name}, ya tienes una entrada registrada. Debes marcar salida primero.",
+                "user": user.full_name
+            }
         new_session = AttendanceSession(user_id=user.id, check_in=datetime.datetime.utcnow())
         db.add(new_session)
+        msg_action = "entrada registrada"
+        title_action = "¡Bienvenido!"
     else:
-        last_session = db.query(AttendanceSession).filter(
-            AttendanceSession.user_id == user.id, 
-            AttendanceSession.check_out == None
-        ).order_by(AttendanceSession.id.desc()).first()
-        
-        if last_session:
-            last_session.check_out = datetime.datetime.utcnow()
-        else:
-            new_session = AttendanceSession(user_id=user.id, check_out=datetime.datetime.utcnow())
-            db.add(new_session)
+        if not last_session:
+            return {
+                "status": "error",
+                "title": "Sin Entrada",
+                "message": f"{user.full_name}, no tienes ninguna entrada activa. Marca entrada primero.",
+                "user": user.full_name
+            }
+        last_session.check_out = datetime.datetime.utcnow()
+        msg_action = "salida registrada"
+        title_action = "¡Hasta pronto!"
 
     db.commit()
 
-    # Gemini Greeting disabled by user request
-    greeting = ""
-    # try:
-    #     model = genai.GenerativeModel("gemini-2.5-flash")
-    #     tipo_mensaje = "saludo de BIENVENIDA" if action == "entrada" else "mensaje de DESPEDIDA"
-    #     prompt = (
-    #         f"Genera un {tipo_mensaje} corto, creativo y orientado a PROGRAMADORES/DEVS para {user.full_name} "
-    #         f"que acaba de marcar su {action} manual en el trabajo. Usa jerga técnica, metáforas de código "
-    #         f"(git, syntax, runtime, shutdown, startup, merge) o chistes de dev. Máximo 15 palabras."
-    #     )
-    #     response = model.generate_content(prompt)
-    #     greeting = response.text.strip()
-    # except Exception as e:
-    #     print(f"Error generating greeting: {e}")
-
     return {
         "status": "success", 
+        "title": title_action,
         "user": user.full_name, 
-        "message": f"{action.capitalize()} manual registrada",
-        "greeting": greeting
+        "message": f"{user.full_name}, tu {msg_action} (manual) correctamente.",
+        "greeting": ""
     }
 
 @app.post("/ai/test")
