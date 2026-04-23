@@ -5,6 +5,10 @@ import { Camera, User, LogIn, CheckCircle, AlertCircle, RefreshCw, Smartphone, S
 import AdminPanel from './components/AdminPanel'
 
 const API_BASE = import.meta.env.VITE_API_URL || "http://localhost:8000"
+const API_KEY = import.meta.env.VITE_API_KEY || "test_key_123"
+
+// Configure axios to always send the API Key
+axios.defaults.headers.common['X-API-KEY'] = API_KEY
 
 export default function App() {
   const [view, setView] = useState('menu') // menu, attendance, register, manual, admin
@@ -24,14 +28,15 @@ export default function App() {
   const [loggedInUser, setLoggedInUser] = useState(null)
   const [greeting, setGreeting] = useState('')
   const [gracePeriodActive, setGracePeriodActive] = useState(false)
+  const [frontVector, setFrontVector] = useState(null)
 
   const webcamRef = useRef(null)
 
   const speakGreeting = (text) => {
     if (!window.speechSynthesis) return
-    window.speechSynthesis.cancel() // Stop any previous speech
+    window.speechSynthesis.cancel()
     const utterance = new SpeechSynthesisUtterance(text)
-    utterance.lang = 'es-ES' // Set to Spanish
+    utterance.lang = 'es-ES'
     utterance.rate = 1.0
     utterance.pitch = 1.1
     window.speechSynthesis.speak(utterance)
@@ -65,7 +70,6 @@ export default function App() {
         showStatus('success', res.data.message)
         if (res.data.greeting) speakGreeting(res.data.greeting)
       } else if (res.data.status === 'error') {
-        // Strict session validation error from backend
         setLoggedInUser(res.data.user || null)
         setWelcomeTitle(res.data.title || 'Atención')
         setWelcomeMsg(res.data.message)
@@ -115,6 +119,9 @@ export default function App() {
       const formData = new FormData()
       formData.append('image', imageSrc)
       formData.append('target_pos', targetPos)
+      if (frontVector) {
+        formData.append('ref_vector', JSON.stringify(frontVector))
+      }
 
       const res = await axios.post(`${API_BASE}/register/check_face`, formData)
 
@@ -126,9 +133,14 @@ export default function App() {
       }
 
       if (res.data.face_detected) {
+        if (regStep === 0 && res.data.encoding) {
+          setFrontVector(res.data.encoding)
+        }
         setRegImages(prev => [...prev, imageSrc])
         setRegStep(prev => prev + 1)
         showStatus('success', `Posición ${regStep + 1} capturada`)
+      } else if (res.data.detected_pos === targetPos && res.data.distance_status === 'ok') {
+        showStatus('error', 'El rostro no coincide con la foto frontal')
       }
     } catch (err) {
       console.error("Error in auto-capture:", err)
@@ -138,7 +150,7 @@ export default function App() {
   useEffect(() => {
     let interval
     if (view === 'register' && regStep < 3) {
-      interval = setInterval(autoCaptureStep, 1000) // Polling faster for better UX
+      interval = setInterval(autoCaptureStep, 1000)
     }
     return () => {
       clearInterval(interval)
@@ -151,7 +163,6 @@ export default function App() {
   }, [view, regStep, autoCaptureStep])
 
   // Registration Logic
-
   const handleRegister = async () => {
     if (!userData.username || !userData.fullName) {
       showStatus('error', 'Por favor llena todos los campos')
@@ -179,6 +190,7 @@ export default function App() {
   const resetReg = () => {
     setRegStep(0)
     setRegImages([])
+    setFrontVector(null)
     setUserData({ username: '', password: '', fullName: '' })
   }
 
@@ -207,14 +219,14 @@ export default function App() {
     }
   }
 
-  // Auto-return from welcome to menu (inicio)
+  // Auto-return from welcome to menu
   useEffect(() => {
     let timeout
     if (view === 'welcome') {
       timeout = setTimeout(() => {
         setLoggedInUser(null)
         setView('menu')
-      }, 3000) // Reduced to 3s for better UX
+      }, 3000)
     }
     return () => clearTimeout(timeout)
   }, [view])
@@ -225,204 +237,153 @@ export default function App() {
         <AdminPanel onBack={() => setView('menu')} />
       ) : (
         <div className="glass-card">
-      <h1>Escaner Facial</h1>
-      <p className="subtitle">
-        {view === 'menu' && 'Bienvenido, selecciona una opción'}
-        {view === 'attendance' && `Escaneando Rostro para ${attendanceAction.toUpperCase()}`}
-        {view === 'register' && `Escaneo de Registro - Posición ${regStep + 1}/3`}
-        {view === 'manual' && `Ingreso Manual - ${attendanceAction.toUpperCase()}`}
-        {view === 'welcome' && '¡Operación Exitosa!'}
-      </p>
+          <h1>Escaner Facial</h1>
+          <p className="subtitle">
+            {view === 'menu' && 'Bienvenido, selecciona una opción'}
+            {view === 'attendance' && `Escaneando Rostro para ${attendanceAction.toUpperCase()}`}
+            {view === 'register' && `Escaneo de Registro - Posición ${regStep + 1}/3`}
+            {view === 'manual' && `Ingreso Manual - ${attendanceAction.toUpperCase()}`}
+            {view === 'welcome' && '¡Operación Exitosa!'}
+          </p>
 
-      {/* Main View Area */}
-      {(view === 'attendance' || view === 'register') && (
-        <div className="camera-wrapper">
-          <Webcam
-            audio={false}
-            ref={webcamRef}
-            screenshotFormat="image/jpeg"
-            videoConstraints={{ width: 640, height: 480, facingMode: "user" }}
-            className="webcam-view"
-          />
-          <div className="camera-overlay">
-            {view === 'register' && (
-              <div className="position-guide-mesh">
-                <div className="face-guide-frame"></div>
-                {distStatus === 'too_far' && <div className="guide-alert animate-pulse">¡Acércate más!</div>}
-                {distStatus === 'too_close' && <div className="guide-alert animate-pulse">¡Aléjate un poco!</div>}
+          {(view === 'attendance' || view === 'register') && (
+            <div className="camera-wrapper">
+              <Webcam
+                audio={false}
+                ref={webcamRef}
+                screenshotFormat="image/jpeg"
+                videoConstraints={{ width: 640, height: 480, facingMode: "user" }}
+                className="webcam-view"
+              />
+              <div className="camera-overlay">
+                {view === 'register' && (
+                  <div className="position-guide-mesh">
+                    <div className="face-guide-frame"></div>
+                    {distStatus === 'too_far' && <div className="guide-alert animate-pulse">¡Acércate más!</div>}
+                    {distStatus === 'too_close' && <div className="guide-alert animate-pulse">¡Aléjate un poco!</div>}
 
-                {regStep === 1 && poseMetrics.ratio_lr <= 1.25 && <div className="guide-arrow left">← Gira a la Izquierda</div>}
-                {regStep === 2 && poseMetrics.ratio_lr >= 0.8 && <div className="guide-arrow right">Gira a la Derecha →</div>}
+                    {regStep === 1 && poseMetrics.ratio_lr <= 1.25 && <div className="guide-arrow left">← Gira a la Izquierda</div>}
+                    {regStep === 2 && poseMetrics.ratio_lr >= 0.8 && <div className="guide-arrow right">Gira a la Derecha →</div>}
 
-                {distStatus === 'ok' && (
-                  <div className="guide-ok-badge">Rostro en posición</div>
-                )}
+                    {distStatus === 'ok' && <div className="guide-ok-badge">Rostro en posición</div>}
 
-                {/* Visualización de Vectores Faciales */}
-                {landmarks && (
-                  <svg
-                    className="landmarks-overlay"
-                    viewBox="0 0 640 480"
-                    preserveAspectRatio="xMidYMid slice"
-                  >
-                    <polyline points={landmarks.jaw.map(p => `${p[0]},${p[1]}`).join(' ')} fill="none" stroke="rgba(0, 255, 127, 0.5)" strokeWidth="2" />
-                    <polyline points={landmarks.nose.map(p => `${p[0]},${p[1]}`).join(' ')} fill="none" stroke="rgba(0, 255, 127, 0.8)" strokeWidth="2" />
-                    <polygon points={landmarks.left_eye.map(p => `${p[0]},${p[1]}`).join(' ')} fill="rgba(0, 255, 127, 0.2)" stroke="rgba(0, 255, 127, 0.8)" strokeWidth="1" />
-                    <polygon points={landmarks.right_eye.map(p => `${p[0]},${p[1]}`).join(' ')} fill="rgba(0, 255, 127, 0.2)" stroke="rgba(0, 255, 127, 0.8)" strokeWidth="1" />
-                    {landmarks.left_pupil && <circle cx={landmarks.left_pupil[0][0]} cy={landmarks.left_pupil[0][1]} r="3" fill="var(--accent)" />}
-                    {landmarks.right_pupil && <circle cx={landmarks.right_pupil[0][0]} cy={landmarks.right_pupil[0][1]} r="3" fill="var(--accent)" />}
-                  </svg>
-                )}
-              </div>
-            )}
-          </div>
-        </div>
-      )}
-
-      {view === 'menu' && (
-        <div className="menu-grid">
-          <button className="btn-menu entry" onClick={() => { setAttendanceAction('entrada'); setView('attendance'); }}>
-            <LogIn size={40} />
-            <span>REGISTRAR ENTRADA</span>
-          </button>
-          <button className="btn-menu exit" onClick={() => { setAttendanceAction('salida'); setView('attendance'); }}>
-            <Smartphone size={40} />
-            <span>REGISTRAR SALIDA</span>
-          </button>
-          <div className="menu-footer">
-            <button className="btn btn-secondary" onClick={() => setView('register')}>
-              <User size={18} style={{ marginRight: '8px' }} /> Registro de Rostro
-            </button>
-            <button className="btn btn-secondary" onClick={() => setView('manual')}>
-              Manual
-            </button>
-            <button className="btn btn-admin" onClick={() => setView('admin')}>
-              <Settings size={18} style={{ marginRight: '8px' }} /> Admin
-            </button>
-          </div>
-        </div>
-      )}
-
-      {view === 'attendance' && (
-        <button className="btn btn-secondary" style={{ marginTop: '16px' }} onClick={() => setView('menu')}>
-          Volver al Menú
-        </button>
-      )}
-
-      {view === 'register' && (
-        <div>
-          {regStep < 3 && regImages.length < 3 ? (
-            <>
-              <div className="step-indicator">
-                {[0, 1, 2].map(i => <div key={i} className={`step-dot ${regStep === i ? 'active' : ''}`}></div>)}
-              </div>
-              <p style={{ textAlign: 'center', marginBottom: '16px', fontSize: '0.9rem', fontWeight: 'bold', color: 'var(--primary)' }}>
-                {regStep === 0 && "Mira de frente..."}
-                {regStep === 1 && "¡Bien! Ahora gira a la izquierda..."}
-                {regStep === 2 && "¡Excelente! Ahora gira a la derecha..."}
-              </p>
-
-              <div className="pose-guide">
-                <div className="gauge-container">
-                  <div className="gauge-label">Giro</div>
-                  <div className="gauge-bar">
-                    <div
-                      className="gauge-indicator"
-                      style={{
-                        left: `${Math.min(Math.max((poseMetrics.ratio_lr - 0.5) * 100 / 1.5, 0), 100)}%`,
-                        backgroundColor: (regStep === 1 && poseMetrics.ratio_lr > 1.25) || (regStep === 2 && poseMetrics.ratio_lr < 0.8) || (regStep === 0 && poseMetrics.ratio_lr >= 0.8 && poseMetrics.ratio_lr <= 1.25) ? 'var(--accent)' : 'var(--primary)'
-                      }}
-                    ></div>
-                    <div className="gauge-target right" style={{ opacity: regStep === 2 ? 1 : 0.2 }}></div>
+                    {landmarks && (
+                      <svg className="landmarks-overlay" viewBox="0 0 640 480" preserveAspectRatio="xMidYMid slice">
+                        <polyline points={landmarks.jaw.map(p => `${p[0]},${p[1]}`).join(' ')} fill="none" stroke="rgba(0, 255, 127, 0.5)" strokeWidth="2" />
+                        <polyline points={landmarks.nose.map(p => `${p[0]},${p[1]}`).join(' ')} fill="none" stroke="rgba(0, 255, 127, 0.8)" strokeWidth="2" />
+                        <polygon points={landmarks.left_eye.map(p => `${p[0]},${p[1]}`).join(' ')} fill="rgba(0, 255, 127, 0.2)" stroke="rgba(0, 255, 127, 0.8)" strokeWidth="1" />
+                        <polygon points={landmarks.right_eye.map(p => `${p[0]},${p[1]}`).join(' ')} fill="rgba(0, 255, 127, 0.2)" stroke="rgba(0, 255, 127, 0.8)" strokeWidth="1" />
+                        {landmarks.left_pupil && <circle cx={landmarks.left_pupil[0][0]} cy={landmarks.left_pupil[0][1]} r="3" fill="var(--accent)" />}
+                        {landmarks.right_pupil && <circle cx={landmarks.right_pupil[0][0]} cy={landmarks.right_pupil[0][1]} r="3" fill="var(--accent)" />}
+                      </svg>
+                    )}
                   </div>
-                </div>
+                )}
               </div>
+            </div>
+          )}
 
-              <div className="capture-status">
-                <RefreshCw className="animate-spin" size={24} style={{ margin: '0 auto', color: 'var(--primary)' }} />
-                <p style={{ fontSize: '0.8rem', marginTop: '8px' }}>Buscando rostro...</p>
+          {view === 'menu' && (
+            <div className="menu-grid">
+              <button className="btn-menu entry" onClick={() => { setAttendanceAction('entrada'); setView('attendance'); }}>
+                <LogIn size={40} />
+                <span>REGISTRAR ENTRADA</span>
+              </button>
+              <button className="btn-menu exit" onClick={() => { setAttendanceAction('salida'); setView('attendance'); }}>
+                <Smartphone size={40} />
+                <span>REGISTRAR SALIDA</span>
+              </button>
+              <div className="menu-footer">
+                <button className="btn btn-secondary" onClick={() => setView('register')}>
+                  <User size={18} style={{ marginRight: '8px' }} /> Registro de Rostro
+                </button>
+                <button className="btn btn-secondary" onClick={() => setView('manual')}> Manual </button>
+                <button className="btn btn-admin" onClick={() => setView('admin')}>
+                  <Settings size={18} style={{ marginRight: '8px' }} /> Admin
+                </button>
               </div>
-            </>
-          ) : (
-            <div className="registration-form">
-              <div className="input-group">
-                <label>Nombre Completo</label>
-                <input type="text" value={userData.fullName} onChange={e => setUserData({ ...userData, fullName: e.target.value })} placeholder="Ej. Juan Pérez" />
-              </div>
+            </div>
+          )}
+
+          {view === 'attendance' && (
+            <button className="btn btn-secondary" style={{ marginTop: '16px' }} onClick={() => setView('menu')}>
+              Volver al Menú
+            </button>
+          )}
+
+          {view === 'register' && (
+            <div>
+              {regStep < 3 && regImages.length < 3 ? (
+                <>
+                  <div className="step-indicator">
+                    {[0, 1, 2].map(i => <div key={i} className={`step-dot ${regStep === i ? 'active' : ''}`}></div>)}
+                  </div>
+                  <p style={{ textAlign: 'center', marginBottom: '16px', fontSize: '0.9rem', fontWeight: 'bold', color: 'var(--primary)' }}>
+                    {regStep === 0 && "Mira de frente..."}
+                    {regStep === 1 && "¡Bien! Ahora gira a la izquierda..."}
+                    {regStep === 2 && "¡Excelente! Ahora gira a la derecha..."}
+                  </p>
+                  <div className="capture-status">
+                    <RefreshCw className="animate-spin" size={24} style={{ margin: '0 auto', color: 'var(--primary)' }} />
+                    <p style={{ fontSize: '0.8rem', marginTop: '8px' }}>Buscando rostro...</p>
+                  </div>
+                </>
+              ) : (
+                <div className="registration-form">
+                  <div className="input-group">
+                    <label>Nombre Completo</label>
+                    <input type="text" value={userData.fullName} onChange={e => setUserData({ ...userData, fullName: e.target.value })} />
+                  </div>
+                  <div className="input-group">
+                    <label>Usuario</label>
+                    <input type="text" value={userData.username} onChange={e => setUserData({ ...userData, username: e.target.value })} />
+                  </div>
+                  <div className="input-group">
+                    <label>Contraseña</label>
+                    <input type="password" value={userData.password} onChange={e => setUserData({ ...userData, password: e.target.value })} />
+                  </div>
+                  <button className="btn btn-primary" onClick={handleRegister} disabled={loading}>
+                    {loading ? <RefreshCw className="animate-spin" /> : "Finalizar Registro"}
+                  </button>
+                </div>
+              )}
+              <button className="btn btn-secondary" style={{ marginTop: '12px' }} onClick={() => { setView('attendance'); resetReg(); }}>Cancelar</button>
+            </div>
+          )}
+
+          {view === 'manual' && (
+            <form onSubmit={handleManualLogin}>
               <div className="input-group">
                 <label>Usuario</label>
-                <input type="text" value={userData.username} onChange={e => setUserData({ ...userData, username: e.target.value })} placeholder="juan.perez" />
+                <input type="text" value={userData.username} required onChange={e => setUserData({ ...userData, username: e.target.value })} />
               </div>
               <div className="input-group">
                 <label>Contraseña</label>
-                <input type="password" value={userData.password} onChange={e => setUserData({ ...userData, password: e.target.value })} placeholder="••••••••" />
+                <input type="password" value={userData.password} required onChange={e => setUserData({ ...userData, password: e.target.value })} />
               </div>
-              <button className="btn btn-primary" onClick={handleRegister} disabled={loading}>
-                {loading ? <RefreshCw className="animate-spin" /> : "Finalizar Registro"}
+              <button type="submit" className="btn btn-primary" disabled={loading}>
+                {loading ? <RefreshCw className="animate-spin" /> : "Ingresar"}
               </button>
+              <button className="btn btn-secondary" style={{ marginTop: '12px' }} onClick={() => setView('attendance')}>Volver al Escaner</button>
+            </form>
+          )}
+
+          {view === 'welcome' && (
+            <div style={{ textAlign: 'center', padding: '20px 0' }}>
+              <CheckCircle size={80} color="var(--accent)" style={{ margin: '0 auto 20px' }} />
+              <h2 style={{ fontSize: '2rem', marginBottom: '10px' }}>{welcomeTitle}</h2>
+              <p style={{ fontSize: '1.5rem', fontWeight: 'bold' }}>{loggedInUser}</p>
+              {greeting && <p className="greeting-text">"{greeting}"</p>}
+              <p>{welcomeMsg}</p>
+              <button className="btn btn-primary" onClick={() => { setLoggedInUser(null); setView('menu'); }}> Aceptar </button>
             </div>
           )}
-          <button className="btn btn-secondary" style={{ marginTop: '12px' }} onClick={() => { setView('attendance'); resetReg(); }}>Cancelar</button>
-        </div>
-      )}
 
-      {view === 'manual' && (
-        <form onSubmit={handleManualLogin}>
-          <div className="input-group">
-            <label>Usuario</label>
-            <input type="text" value={userData.username} required onChange={e => setUserData({ ...userData, username: e.target.value })} />
-          </div>
-          <div className="input-group">
-            <label>Contraseña</label>
-            <input type="password" value={userData.password} required onChange={e => setUserData({ ...userData, password: e.target.value })} />
-          </div>
-          <button type="submit" className="btn btn-primary" disabled={loading}>
-            {loading ? <RefreshCw className="animate-spin" /> : "Ingresar"}
-          </button>
-          <button className="btn btn-secondary" style={{ marginTop: '12px' }} onClick={() => setView('attendance')}>Volver al Escaner</button>
-        </form>
-      )}
-
-      {view === 'welcome' && (
-        <div style={{ textAlign: 'center', padding: '20px 0' }}>
-          <div className="welcome-icon">
-            <CheckCircle size={80} color="var(--accent)" style={{ margin: '0 auto 20px' }} />
-          </div>
-          <h2 style={{ fontSize: '2rem', marginBottom: '10px' }}>{welcomeTitle}</h2>
-          <p style={{ fontSize: '1.5rem', fontWeight: 'bold', color: 'var(--primary)', marginBottom: '10px' }}>
-            {loggedInUser}
-          </p>
-          {greeting && (
-            <p style={{
-              fontSize: '1.1rem',
-              color: 'var(--accent)',
-              marginBottom: '30px',
-              fontStyle: 'italic',
-              padding: '10px 20px',
-              borderLeft: '4px solid var(--accent)',
-              backgroundColor: 'rgba(0, 255, 127, 0.1)',
-              borderRadius: '0 8px 8px 0'
-            }}>
-              "{greeting}"
-            </p>
+          {status.msg && (
+            <div className={`status-msg ${status.type === 'success' ? 'status-success' : 'status-error'}`}>
+              <span style={{ marginLeft: '8px' }}>{status.msg}</span>
+            </div>
           )}
-          <p style={{ color: 'var(--text-dim)', marginBottom: '20px' }}>{welcomeMsg}</p>
-          <button className="btn btn-primary" onClick={() => { setLoggedInUser(null); setView('menu'); }}>
-            Aceptar
-          </button>
-          <p style={{ fontSize: '0.8rem', color: 'var(--text-dim)', marginTop: '20px' }}>
-            Regresando al escaner automáticamente en unos segundos...
-          </p>
-        </div>
-      )}
-
-      {/* Status Messages */}
-      {status.msg && (
-        <div className={`status-msg ${status.type === 'success' ? 'status-success' : 'status-error'}`}>
-          {status.type === 'success' ? <CheckCircle size={18} inline /> : <AlertCircle size={18} inline />}
-          <span style={{ marginLeft: '8px' }}>{status.msg}</span>
-        </div>
-      )}
         </div>
       )}
     </div>

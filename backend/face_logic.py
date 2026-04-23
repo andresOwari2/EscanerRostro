@@ -197,11 +197,11 @@ def get_face_position(image_bytes):
         nose_y = float(nose[1])
         dist_y = float(nose_y - eye_y)
 
-        # Pose Thresholds (Tuned for YuNet)
+        # Pose Thresholds (Tuned for YuNet - Relaxed for better UX)
         position = "front"
-        if ratio_lr < 0.60: position = "left" # Ajuste de umbral
-        elif ratio_lr > 1.65: position = "right" # Ajuste de umbral
-        elif dist_y < (face_height * 0.12): position = "up" # Ajuste de umbral
+        if ratio_lr < 0.68: position = "left" # De 0.60 -> 0.68 (Más sensible)
+        elif ratio_lr > 1.48: position = "right" # De 1.65 -> 1.48 (Más sensible)
+        elif dist_y < (face_height * 0.14): position = "up" # De 0.12 -> 0.14
         
         # Viz landmarks mapping for frontend
         viz_landmarks = {

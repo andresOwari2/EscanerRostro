@@ -1,7 +1,7 @@
 from sqlalchemy import create_engine, Column, Integer, String, ForeignKey, DateTime, Text, Float, Boolean, Numeric
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
-from passlib.hash import bcrypt
+from passlib.hash import pbkdf2_sha256
 import datetime
 import os
 
@@ -23,9 +23,21 @@ engine = create_engine(DATABASE_URL)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
 
+class Client(Base):
+    __tablename__ = "clients"
+    id = Column(Integer, primary_key=True, index=True)
+    company_name = Column(String(100), unique=True, nullable=False)
+    api_key = Column(String(100), unique=True, index=True, nullable=False)
+    is_active = Column(Boolean, default=True)
+    # SaaS Quota Management
+    max_requests_per_month = Column(Integer, default=-1) # -1 means unlimited for now
+    total_requests_made = Column(Integer, default=0)
+    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+
 class User(Base):
     __tablename__ = "users"
     id = Column(Integer, primary_key=True, index=True)
+    client_id = Column(Integer, ForeignKey("clients.id", ondelete="CASCADE"), nullable=False)
     username = Column(String(50), unique=True, index=True, nullable=False)
     password_hash = Column(String(255), nullable=False)
     full_name = Column(String(100))
@@ -37,6 +49,7 @@ class User(Base):
 class FaceVector(Base):
     __tablename__ = "face_vectors"
     id = Column(Integer, primary_key=True, index=True)
+    client_id = Column(Integer, ForeignKey("clients.id", ondelete="CASCADE"), nullable=False)
     user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"))
     vector = Column(Text, nullable=False)  # Stored as JSON string [float, float, ...]
     position_label = Column(String(20))    # front, left, right, up, down
@@ -45,6 +58,7 @@ class FaceVector(Base):
 class AttendanceLog(Base):
     __tablename__ = "attendance_logs"
     id = Column(Integer, primary_key=True, index=True)
+    client_id = Column(Integer, ForeignKey("clients.id", ondelete="CASCADE"), nullable=False)
     user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"))
     timestamp = Column(DateTime, default=datetime.datetime.utcnow)
     method = Column(String(20), default="face") # face or manual
@@ -54,6 +68,7 @@ class AttendanceLog(Base):
 class AttendanceSession(Base):
     __tablename__ = "attendance_sessions"
     id = Column(Integer, primary_key=True, index=True)
+    client_id = Column(Integer, ForeignKey("clients.id", ondelete="CASCADE"), nullable=False)
     user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"))
     check_in = Column(DateTime, nullable=True)
     check_out = Column(DateTime, nullable=True)
@@ -68,6 +83,7 @@ class Admin(Base):
 class WorkSchedule(Base):
     __tablename__ = "work_schedules"
     id = Column(Integer, primary_key=True, index=True)
+    client_id = Column(Integer, ForeignKey("clients.id", ondelete="CASCADE"), nullable=False)
     user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"))
     day_of_week = Column(Integer) # 0-6 (Mon-Sun)
     start_time = Column(String(10)) # "08:00"
@@ -89,6 +105,7 @@ class CompanyGoal(Base):
     target_revenue = Column(Numeric(15, 2))
     achieved_revenue = Column(Numeric(15, 2), default=0.0)
 
+
 def init_db():
     Base.metadata.create_all(bind=engine)
     
@@ -100,7 +117,14 @@ def init_db():
             hashed_pass = pbkdf2_sha256.hash("123")
             new_admin = Admin(username="superadmin", password_hash=hashed_pass)
             db.add(new_admin)
-            db.commit()
+        
+        # Initialize a test client with a sample API Key
+        test_client = db.query(Client).filter(Client.company_name == "Empresa Test").first()
+        if not test_client:
+            new_client = Client(company_name="Empresa Test", api_key="test_key_123", is_active=True)
+            db.add(new_client)
+            
+        db.commit()
     except Exception as e:
         print(f"Error seeding admin: {e}")
     finally:

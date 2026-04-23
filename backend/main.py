@@ -27,13 +27,13 @@ try:
 except ImportError:
     logger.error("OpenCV not found in environment")
 
-from fastapi import FastAPI, Depends, HTTPException, UploadFile, File, Form
+from fastapi import FastAPI, Depends, HTTPException, UploadFile, File, Form, Header
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
 import json
 import uvicorn
 
-from database import init_db, get_db, User, FaceVector, AttendanceLog, AttendanceSession, Admin, WorkSchedule, ProductivityRating, CompanyGoal
+from database import init_db, get_db, User, FaceVector, AttendanceLog, AttendanceSession, Admin, WorkSchedule, ProductivityRating, CompanyGoal, Client
 import face_logic
 import datetime
 from sqlalchemy import func, extract
@@ -78,6 +78,21 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+async def verify_api_key(x_api_key: str = Header(None), db: Session = Depends(get_db)):
+    if not x_api_key:
+        raise HTTPException(status_code=401, detail="Falta la API Key (X-API-KEY header)")
+    
+    client = db.query(Client).filter(Client.api_key == x_api_key, Client.is_active == True).first()
+    
+    if not client:
+        raise HTTPException(status_code=403, detail="API Key inválida o inactiva")
+    
+    # Increment usage counter
+    client.total_requests_made += 1
+    db.commit()
+    
+    return client
+
 @app.on_event("startup")
 def startup():
     logger.info("--- APPLICATION STARTUP ---")
@@ -99,18 +114,34 @@ def health_check():
 @app.post("/register/check_face")
 async def check_face(
     image: str = Form(...), # Base64 image
-    target_pos: str = Form(...) # front, left, right, up
+    target_pos: str = Form(...), # front, left, right, up
+    ref_vector: str = Form(None), # Optional JSON string of the frontal vector
+    client: Client = Depends(verify_api_key)
 ):
     try:
         img_bytes = face_logic.decode_base64_image(image)
         pos_data = face_logic.get_face_position(img_bytes)
         
         detected_pos = pos_data["position"]
-        logger.info(f"Face check: detected={detected_pos}, distance={pos_data['distance']}")
+        enc = face_logic.get_face_encoding(img_bytes)
+        
+        # Identity cross-check (your idea!)
+        identity_match = True
+        if ref_vector and enc:
+            try:
+                ref_list = json.loads(ref_vector)
+                # Use a slightly more lenient tolerance for cross-check (0.35)
+                identity_match = face_logic.compare_faces([ref_list], enc, tolerance=0.35)
+            except:
+                identity_match = False
+
+        face_detected = (detected_pos == target_pos and pos_data["distance"] == "ok" and identity_match)
+        logger.info(f"Face check: detected={detected_pos}, target={target_pos}, identity={identity_match}")
         
         return {
-            "face_detected": (detected_pos == target_pos and pos_data["distance"] == "ok"),
+            "face_detected": face_detected,
             "detected_pos": detected_pos,
+            "encoding": enc, # Return current encoding for frontend to store
             "distance_status": pos_data["distance"],
             "metrics": {
                 "ratio_lr": pos_data["ratio_lr"],
@@ -129,15 +160,17 @@ async def register(
     password: str = Form(...),
     full_name: str = Form(...),
     images: list[str] = Form(...), # List of base64 images
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    client: Client = Depends(verify_api_key)
 ):
-    # Check if user exists
-    existing_user = db.query(User).filter(User.username == username).first()
+    # Check if user exists within this client
+    existing_user = db.query(User).filter(User.username == username, User.client_id == client.id).first()
     if existing_user:
         raise HTTPException(status_code=400, detail="Username already registered")
 
-    # Create User
-    new_user = User(username=username, password_hash=password, full_name=full_name) # In production use hashing
+    # Create User with Hashed Password and Client ID
+    hashed_pwd = get_password_hash(password)
+    new_user = User(username=username, password_hash=hashed_pwd, full_name=full_name, client_id=client.id)
     db.add(new_user)
     db.commit()
     db.refresh(new_user)
@@ -150,6 +183,7 @@ async def register(
         if encoding:
             face_vec = FaceVector(
                 user_id=new_user.id,
+                client_id=client.id,
                 vector=json.dumps(encoding),
                 position_label=f"pos_{i+1}"
             )
@@ -169,7 +203,8 @@ async def register(
 async def verify(
     image: str = Form(...), # Base64 image
     action: str = Form("entrada"), # entrada or salida
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    client: Client = Depends(verify_api_key)
 ):
     img_bytes = face_logic.decode_base64_image(image)
     unknown_encoding = face_logic.get_face_encoding(img_bytes)
@@ -178,14 +213,13 @@ async def verify(
         logger.warning("Verify: No face encoding extracted from image")
         raise HTTPException(status_code=400, detail="No face detected in camera")
 
-    # This is a naive implementation: fetch all vectors and compare
-    # In a real system, you'd use a vector DB or optimize this.
-    all_vectors = db.query(FaceVector).all()
+    # Only fetch vectors belonging to this client!
+    all_vectors = db.query(FaceVector).filter(FaceVector.client_id == client.id).all()
     
     for vec in all_vectors:
         known_encoding = json.loads(vec.vector)
         if face_logic.compare_faces([known_encoding], unknown_encoding, tolerance=0.4):
-            user = db.query(User).filter(User.id == vec.user_id).first()
+            user = db.query(User).filter(User.id == vec.user_id, User.client_id == client.id).first()
             
             if not user.is_active:
                 logger.warning(f"Verify: User {user.username} is inactive")
@@ -194,7 +228,7 @@ async def verify(
             # Determine Punctuality Status
             attendance_status = "Puntual"
             if action == "entrada":
-                schedule = db.query(WorkSchedule).filter(WorkSchedule.user_id == user.id).first()
+                schedule = db.query(WorkSchedule).filter(WorkSchedule.user_id == user.id, WorkSchedule.client_id == client.id).first()
                 if schedule:
                     now_time = datetime.datetime.utcnow().time()
                     # Safe comparison: handle both time objects and strings
@@ -207,13 +241,14 @@ async def verify(
                     if hasattr(sched_time, 'strftime') and now_time > sched_time:
                         attendance_status = "Tardanza"
 
-            # Register in General Log
-            log = AttendanceLog(user_id=user.id, method="facial", action=action, status=attendance_status)
+            # Register in General Log with Client ID
+            log = AttendanceLog(user_id=user.id, client_id=client.id, method="facial", action=action, status=attendance_status)
             db.add(log)
             
-            # Manage Session with Strict Control
+            # Manage Session with Strict Control and Client ID
             last_session = db.query(AttendanceSession).filter(
                 AttendanceSession.user_id == user.id, 
+                AttendanceSession.client_id == client.id,
                 AttendanceSession.check_out == None
             ).order_by(AttendanceSession.id.desc()).first()
 
@@ -225,7 +260,7 @@ async def verify(
                         "message": f"{user.full_name}, ya tienes una entrada registrada. Debes marcar salida primero.",
                         "user": user.full_name
                     }
-                new_session = AttendanceSession(user_id=user.id, check_in=datetime.datetime.utcnow())
+                new_session = AttendanceSession(user_id=user.id, client_id=client.id, check_in=datetime.datetime.utcnow())
                 db.add(new_session)
                 msg_action = "entrada registrada"
                 title_action = "¡Bienvenido!"
@@ -287,28 +322,30 @@ async def login_manual(
     username: str = Form(...),
     password: str = Form(...),
     action: str = Form("entrada"),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    client: Client = Depends(verify_api_key)
 ):
-    user = db.query(User).filter(User.username == username, User.password_hash == password).first()
-    if not user:
-        raise HTTPException(status_code=401, detail="Invalid credentials")
+    user = db.query(User).filter(User.username == username, User.client_id == client.id).first()
+    if not user or not verify_password(password, user.password_hash):
+        raise HTTPException(status_code=401, detail="Credenciales inválidas")
     
     # Determine Punctuality Status
     attendance_status = "Puntual"
     if action == "entrada":
-        schedule = db.query(WorkSchedule).filter(WorkSchedule.user_id == user.id).first()
+        schedule = db.query(WorkSchedule).filter(WorkSchedule.user_id == user.id, WorkSchedule.client_id == client.id).first()
         if schedule:
             now_time = datetime.datetime.utcnow().time()
             if now_time > schedule.start_time:
                 attendance_status = "Tardanza"
 
-    # Register manual in General Log
-    log = AttendanceLog(user_id=user.id, method="manual", action=action, status=attendance_status)
+    # Register manual in General Log with Client ID
+    log = AttendanceLog(user_id=user.id, client_id=client.id, method="manual", action=action, status=attendance_status)
     db.add(log)
     
-    # Manage Session with Strict Control
+    # Manage Session with Strict Control and Client ID
     last_session = db.query(AttendanceSession).filter(
         AttendanceSession.user_id == user.id, 
+        AttendanceSession.client_id == client.id,
         AttendanceSession.check_out == None
     ).order_by(AttendanceSession.id.desc()).first()
 
@@ -320,7 +357,7 @@ async def login_manual(
                 "message": f"{user.full_name}, ya tienes una entrada registrada. Debes marcar salida primero.",
                 "user": user.full_name
             }
-        new_session = AttendanceSession(user_id=user.id, check_in=datetime.datetime.utcnow())
+        new_session = AttendanceSession(user_id=user.id, client_id=client.id, check_in=datetime.datetime.utcnow())
         db.add(new_session)
         msg_action = "entrada registrada"
         title_action = "¡Bienvenido!"
